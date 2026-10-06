@@ -330,6 +330,12 @@ micro_wake_word:
                                       id(ikabot_tts_dispatched) = false;
                                       id(ikabot_suppress_tts) = false;
 
+                                  - if:
+                                      condition:
+                                        switch.is_on: beam_lock_enabled
+                                      then:
+                                        - lambda: id(respeaker).lock_beam();
+
                                   - homeassistant.event:
                                       event: esphome.ikabot_xvf_activation_requested
                                       data:
@@ -364,8 +370,6 @@ voice_assistant:
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
-    - homeassistant.action:
-        action: script.ikabot_restaure_volume_freebox
   on_client_disconnected:
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
@@ -394,6 +398,10 @@ voice_assistant:
   # A new VA turn starts only after the Lite confirmed the activation phrase.
   on_start:
     - lambda: |-
+        // New token for each VA turn. This prevents a delayed ACK from the
+        // previous turn from finishing the next TTS during continue_conversation.
+        id(ikabot_session_token) =
+          std::to_string(millis()) + "-" + std::to_string(random_uint32());
         id(ikabot_tts_dispatched) = false;
         id(ikabot_suppress_tts) = false;
   on_listening:
@@ -433,7 +441,8 @@ voice_assistant:
         } else {
           response = response.substr(first, last - first + 1);
         }
-        id(ikabot_suppress_tts) = (response == "OK_ACTION");
+        id(ikabot_suppress_tts) =
+          id(ikabot_suppress_tts) || (response == "OK_ACTION");
 
     - if:
         condition:
@@ -505,6 +514,8 @@ voice_assistant:
     # Reset the voice assistant phase id and reset the LED animations.
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    - homeassistant.action:
+        action: script.ikabot_restaure_volume_freebox
   on_timer_finished:
     - switch.turn_on: timer_ringing
     - lambda: |
