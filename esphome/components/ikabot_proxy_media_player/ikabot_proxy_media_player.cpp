@@ -53,7 +53,7 @@ void IkabotProxyMediaPlayer::control(const media_player::MediaPlayerCall &call) 
     this->set_state_(media_player::MEDIA_PLAYER_STATE_ANNOUNCING);
 
     this->cancel_timeout("external-playback-watchdog");
-    this->set_timeout("external-playback-watchdog", 70000, [this]() {
+    this->set_timeout("external-playback-watchdog", 80000, [this]() {
       if (!this->awaiting_external_finish_)
         return;
       ESP_LOGW(TAG, "External playback watchdog expired");
