@@ -1,5 +1,9 @@
 name: Validate Ikabot ESPHome
 
+concurrency:
+  group: ikabot-validation-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
