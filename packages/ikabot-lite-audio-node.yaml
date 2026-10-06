@@ -84,6 +84,7 @@ script:
       - homeassistant.event:
           event: esphome.ikabot_audio_started
           data:
+            source: "ikabot_lite"
             kind: !lambda return kind;
             token: !lambda return token;
 
@@ -96,6 +97,7 @@ script:
       - homeassistant.event:
           event: esphome.ikabot_audio_finished
           data:
+            source: "ikabot_lite"
             kind: !lambda return kind;
             token: !lambda return token;
 
@@ -108,6 +110,7 @@ script:
       - homeassistant.event:
           event: esphome.ikabot_audio_failed
           data:
+            source: "ikabot_lite"
             kind: !lambda return kind;
             token: !lambda return token;
 
@@ -139,7 +142,7 @@ script:
           condition:
             media_player.is_announcing:
               id: external_media_player
-          timeout: 3s
+          timeout: 2s
 
       - if:
           condition:
@@ -156,12 +159,26 @@ script:
                   not:
                     media_player.is_announcing:
                       id: external_media_player
-                timeout: 8s
+                timeout: 5s
 
-            - script.execute:
-                id: ikabot_audio_publish_finished
-                kind: "activation"
-                token: !lambda return token;
+            - if:
+                condition:
+                  not:
+                    media_player.is_announcing:
+                      id: external_media_player
+                then:
+                  - script.execute:
+                      id: ikabot_audio_publish_finished
+                      kind: "activation"
+                      token: !lambda return token;
+                else:
+                  - media_player.stop:
+                      id: external_media_player
+                      announcement: true
+                  - script.execute:
+                      id: ikabot_audio_publish_failed
+                      kind: "activation"
+                      token: !lambda return token;
           else:
             - script.execute:
                 id: ikabot_audio_publish_failed
@@ -254,10 +271,24 @@ script:
                       id: external_media_player
                 timeout: 70s
 
-            - script.execute:
-                id: ikabot_audio_publish_finished
-                kind: "tts"
-                token: !lambda return token;
+            - if:
+                condition:
+                  not:
+                    media_player.is_announcing:
+                      id: external_media_player
+                then:
+                  - script.execute:
+                      id: ikabot_audio_publish_finished
+                      kind: "tts"
+                      token: !lambda return token;
+                else:
+                  - media_player.stop:
+                      id: external_media_player
+                      announcement: true
+                  - script.execute:
+                      id: ikabot_audio_publish_failed
+                      kind: "tts"
+                      token: !lambda return token;
           else:
             - script.execute:
                 id: ikabot_audio_publish_failed
