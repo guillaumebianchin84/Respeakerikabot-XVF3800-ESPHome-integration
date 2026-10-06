@@ -104,3 +104,11 @@
     - action: esphome.ikabot_xvf3800_ikabot_external_tts_failed
       data:
         token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - XVF stop audio vers Lite"
+  mode: restart
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_xvf_stop_audio
+  actions:
+    - action: esphome.ikabot_ikabot_stop_audio
