@@ -11,7 +11,7 @@ on:
 jobs:
   validate-xvf:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +29,8 @@ jobs:
           wifi_password: "TEST_PASSWORD_123456"
           ikabot_xvf_api_encryption_key: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
           ikabot_xvf_ota_password: "TEST_OTA_PASSWORD"
+          ikabot_lite_api_encryption_key: "YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk="
+          ikabot_lite_ota_password: "TEST_LITE_OTA_PASSWORD"
           EOF
 
       - name: Validate XVF configuration
@@ -36,3 +38,9 @@ jobs:
 
       - name: Compile XVF firmware
         run: esphome compile config/ikabot-xvf3800.yaml
+
+      - name: Validate ReSpeaker Lite audio-node overlay
+        run: esphome config config/ikabot-lite-audio-node-ci.yaml
+
+      - name: Compile ReSpeaker Lite audio-node overlay
+        run: esphome compile config/ikabot-lite-audio-node-ci.yaml
