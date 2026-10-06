@@ -26,7 +26,7 @@
       event_type: esphome.ikabot_audio_finished
   conditions:
     - condition: template
-      value_template: "{{ trigger.event.data.kind == 'activation' }}"
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'activation' }}"
   actions:
     - action: esphome.ikabot_xvf3800_ikabot_activation_finished
       data:
@@ -39,7 +39,7 @@
       event_type: esphome.ikabot_audio_failed
   conditions:
     - condition: template
-      value_template: "{{ trigger.event.data.kind == 'activation' }}"
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'activation' }}"
   actions:
     - action: esphome.ikabot_xvf3800_ikabot_activation_failed
       data:
@@ -73,7 +73,7 @@
       event_type: esphome.ikabot_audio_started
   conditions:
     - condition: template
-      value_template: "{{ trigger.event.data.kind == 'tts' }}"
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'tts' }}"
   actions:
     - action: esphome.ikabot_xvf3800_ikabot_external_tts_started
       data:
@@ -86,7 +86,7 @@
       event_type: esphome.ikabot_audio_finished
   conditions:
     - condition: template
-      value_template: "{{ trigger.event.data.kind == 'tts' }}"
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'tts' }}"
   actions:
     - action: esphome.ikabot_xvf3800_ikabot_external_tts_finished
       data:
@@ -99,7 +99,7 @@
       event_type: esphome.ikabot_audio_failed
   conditions:
     - condition: template
-      value_template: "{{ trigger.event.data.kind == 'tts' }}"
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'tts' }}"
   actions:
     - action: esphome.ikabot_xvf3800_ikabot_external_tts_failed
       data:
