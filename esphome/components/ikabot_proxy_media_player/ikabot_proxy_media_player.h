@@ -3,6 +3,8 @@
 #include "esphome/components/media_player/media_player.h"
 #include "esphome/core/component.h"
 
+#include <string>
+
 namespace esphome::ikabot_proxy_media_player {
 
 class IkabotProxyMediaPlayer final : public Component, public media_player::MediaPlayer {
