@@ -18,7 +18,7 @@ switch:
     icon: mdi:speaker
     entity_category: config
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
       - voice_assistant.stop:
       - micro_wake_word.stop:
