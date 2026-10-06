@@ -30,7 +30,7 @@ de miroir d'état :
 7. ESPHome Voice Assistant voit alors la fin de réponse et applique nativement
    `continue_conversation`.
 
-Un watchdog de 70 s force la sortie si l'ACK de fin se perd.
+Le Lite attend au maximum 70 s pour une lecture TTS. Le proxy XVF garde une marge et force la sortie à 80 s si l'ACK de fin se perd.
 
 ## Séquence normale
 
@@ -81,8 +81,11 @@ XVF wake word
 
 ## Cas spéciaux
 
-- **OK_ACTION** : arrêt sans TTS et restauration du volume.
-- **INCOMPRÉHENSIBLE** : arrêt silencieux et restauration du volume.
+- **OK_ACTION** : l'URL de streaming est retenue jusqu'à lecture du texte TTS.
+  Si le texte vaut OK_ACTION, aucun TTS n'est envoyé au Lite ; tout audio
+  d'attente éventuel est arrêté et le volume est restauré.
+- **INCOMPRÉHENSIBLE** : arrêt silencieux, arrêt du son d'attente et restauration
+  du volume.
 - **Activation sans ACK** : watchdog 8 s, puis démarrage de l'écoute pour ne pas
   laisser Ikabot bloqué.
 - **TTS sans ACK de fin** : watchdog proxy 70 s.
@@ -95,6 +98,16 @@ XVF wake word
 - `packages/ikabot-lite-audio-node.yaml` : overlay à ajouter au Lite actuel.
 - `ha/ikabot_audio_bridge.yaml` : automations Home Assistant.
 - `esphome/components/ikabot_proxy_media_player/` : proxy d'état de lecture.
+
+## Autorisations Home Assistant indispensables
+
+Les deux ESPHome doivent pouvoir émettre des événements et appeler des actions
+Home Assistant. Après ajout de chaque appareil dans l'intégration ESPHome,
+activer l'option **Allow the device to perform Home Assistant actions**.
+
+Sans cette autorisation :
+- le XVF ne pourra pas demander les sons au Lite ni agir sur le volume Freebox ;
+- le Lite ne pourra pas renvoyer ses ACK de lecture à Home Assistant.
 
 ## Avant le premier flash
 
