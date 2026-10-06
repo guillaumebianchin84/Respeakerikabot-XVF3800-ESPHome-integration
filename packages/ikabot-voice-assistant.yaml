@@ -51,6 +51,19 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+  # Streaming TTS can expose its URL before the full response text reaches
+  # on_tts_start. Do not send audio to the Lite until we know the response is
+  # not the silent OK_ACTION sentinel.
+  - id: ikabot_tts_decision_known
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ikabot_pending_tts_uri
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
 api:
   actions:
     - action: ikabot_activation_finished
@@ -404,6 +417,8 @@ voice_assistant:
           std::to_string(millis()) + "-" + std::to_string(random_uint32());
         id(ikabot_tts_dispatched) = false;
         id(ikabot_suppress_tts) = false;
+        id(ikabot_tts_decision_known) = false;
+        id(ikabot_pending_tts_uri).clear();
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
@@ -423,13 +438,19 @@ voice_assistant:
   on_intent_progress:
     - if:
         condition:
-          lambda: 'return !x.empty() && !id(ikabot_suppress_tts);'
+          lambda: 'return !x.empty();'
         then:
-          - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+          - lambda: |-
+              id(ikabot_pending_tts_uri) = x;
+              id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
-          - script.execute:
-              id: ikabot_dispatch_tts
-              uri: !lambda return x;
+          - if:
+              condition:
+                lambda: return id(ikabot_tts_decision_known) && !id(ikabot_suppress_tts);
+              then:
+                - script.execute:
+                    id: ikabot_dispatch_tts
+                    uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_tts_start:
     - lambda: |-
@@ -443,6 +464,7 @@ voice_assistant:
         }
         id(ikabot_suppress_tts) =
           id(ikabot_suppress_tts) || (response == "OK_ACTION");
+        id(ikabot_tts_decision_known) = true;
 
     - if:
         condition:
@@ -451,21 +473,44 @@ voice_assistant:
           - logger.log:
               level: INFO
               format: "IKABOT: OK_ACTION -> no TTS"
+          - homeassistant.event:
+              event: esphome.ikabot_xvf_stop_audio
+              data:
+                token: !lambda return id(ikabot_session_token);
           - homeassistant.action:
               action: script.ikabot_restaure_volume_freebox
           - voice_assistant.stop:
         else:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
+          - if:
+              condition:
+                lambda: return !id(ikabot_pending_tts_uri).empty();
+              then:
+                - script.execute:
+                    id: ikabot_dispatch_tts
+                    uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_tts_end:
+    - lambda: |-
+        if (!x.empty())
+          id(ikabot_pending_tts_uri) = x;
+
+    # TTS_START normally arrives first. If a backend ever skips it, fail open
+    # here rather than losing the spoken response.
     - if:
         condition:
-          lambda: return !id(ikabot_suppress_tts);
+          lambda: return !id(ikabot_tts_decision_known);
+        then:
+          - lambda: id(ikabot_tts_decision_known) = true;
+
+    - if:
+        condition:
+          lambda: return !id(ikabot_suppress_tts) && !id(ikabot_pending_tts_uri).empty();
         then:
           - script.execute:
               id: ikabot_dispatch_tts
-              uri: !lambda return x;
+              uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_stt_end:
     - script.execute:
@@ -493,6 +538,10 @@ voice_assistant:
           - logger.log:
               level: INFO
               format: "IKABOT: incomprehensible -> stop silently"
+          - homeassistant.event:
+              event: esphome.ikabot_xvf_stop_audio
+              data:
+                token: !lambda return id(ikabot_session_token);
           - homeassistant.action:
               action: script.ikabot_restaure_volume_freebox
           - voice_assistant.stop:
