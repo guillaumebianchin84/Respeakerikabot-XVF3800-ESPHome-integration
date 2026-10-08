@@ -117,14 +117,15 @@
 - alias: "Ikabot - Archivage des 5 derniers WAV STT XVF"
   description: >
     Conserve automatiquement les 5 derniers enregistrements audio envoyés au STT
-    Ikabot. Déclenchement direct sur le wake du XVF, sans dépendre du nom d'une
-    entité Home Assistant.
+    Ikabot. Le déclenchement se fait à la fin réelle du STT, via l'événement
+    esphome.stt_text émis par le XVF, puis laisse 2 secondes à Home Assistant
+    pour finaliser l'écriture du WAV avant l'archivage.
   mode: restart
   triggers:
     - trigger: event
-      event_type: esphome.ikabot_xvf_activation_requested
+      event_type: esphome.stt_text
   conditions: []
   actions:
     - delay:
-        seconds: 30
+        seconds: 2
     - action: shell_command.ikabot_actualise_wav
