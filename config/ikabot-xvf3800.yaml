@@ -15,6 +15,7 @@ packages:
       - packages/base.yaml
       - packages/hardware.yaml
       - packages/ikabot-voice-assistant.yaml
+      - packages/ikabot-diagnostics.yaml
       - packages/leds.yaml
       - packages/timers-alarm.yaml
 
