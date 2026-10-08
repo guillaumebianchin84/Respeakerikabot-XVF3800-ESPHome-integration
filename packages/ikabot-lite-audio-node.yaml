@@ -15,6 +15,10 @@ esphome:
   on_boot:
     priority: -100
     then:
+      - delay: 1s
+      - media_player.volume_set:
+          id: external_media_player
+          volume: 85%
       - if:
           condition:
             switch.is_on: ikabot_audio_only_mode
