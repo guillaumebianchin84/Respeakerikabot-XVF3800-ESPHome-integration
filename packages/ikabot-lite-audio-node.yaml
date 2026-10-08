@@ -11,6 +11,20 @@
 #   - audio_file ids attente_01..attente_20
 # =============================================================================
 
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - if:
+          condition:
+            switch.is_on: ikabot_audio_only_mode
+          then:
+            - voice_assistant.stop:
+            - micro_wake_word.stop:
+            - logger.log:
+                level: INFO
+                format: "IKABOT AUDIO NODE: boot in audio-only mode"
+
 switch:
   - platform: template
     id: ikabot_audio_only_mode
@@ -18,7 +32,7 @@ switch:
     icon: mdi:speaker
     entity_category: config
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
       - voice_assistant.stop:
       - micro_wake_word.stop:
