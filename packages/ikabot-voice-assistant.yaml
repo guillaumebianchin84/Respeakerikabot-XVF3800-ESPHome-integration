@@ -123,7 +123,25 @@ api:
             condition:
               lambda: return token == id(ikabot_session_token);
             then:
+              - logger.log:
+                  level: WARN
+                  format: "IKABOT: external TTS failed -> safe reset"
               - lambda: id(ikabot_proxy_player).external_failed();
+              - homeassistant.event:
+                  event: esphome.ikabot_xvf_stop_audio
+                  data:
+                    token: !lambda return id(ikabot_session_token);
+              - homeassistant.action:
+                  action: script.ikabot_restaure_volume_freebox
+              - voice_assistant.stop:
+
+# Home Assistant keeps the authoritative "volume temporarily lowered" flag.
+# It survives an XVF reboot/disconnection, allowing recovery on reconnect.
+binary_sensor:
+  - platform: homeassistant
+    id: ikabot_volume_temporairement_baisse
+    entity_id: input_boolean.ikabot_volume_temporairement_baisse
+    internal: true
 
 switch:
   # Mute Sound Switch.
@@ -396,17 +414,45 @@ voice_assistant:
         then:
           - switch.turn_off: mic_mute_switch
     - lambda: id(init_in_progress) = false;
+
+    # Crash/reboot/disconnection recovery: if Home Assistant says a previous
+    # Ikabot turn left the house volume lowered, restore it before going ready.
+    - wait_until:
+        condition:
+          lambda: return id(ikabot_volume_temporairement_baisse).has_state();
+        timeout: 5s
+    - if:
+        condition:
+          lambda: |-
+            return id(ikabot_volume_temporairement_baisse).has_state() &&
+                   id(ikabot_volume_temporairement_baisse).state;
+        then:
+          - logger.log:
+              level: WARN
+              format: "IKABOT: reconnect with volume still lowered -> restoring"
+          - homeassistant.action:
+              action: script.ikabot_restaure_volume_freebox
+
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
+    - logger.log:
+        level: WARN
+        format: "IKABOT: Home Assistant disconnected -> abort; volume recovery will run on reconnect"
     - voice_assistant.stop:
-    - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
+    - lambda: |-
+        id(respeaker).unlock_beam();
+        id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
   on_error:
     - script.execute:
         id: ikabot_diag_error
         message: !lambda 'return message;'
+
+    # Whatever the pipeline error is, never leave the Freebox/Google volume ducked.
+    - homeassistant.action:
+        action: script.ikabot_restaure_volume_freebox
 
     # Only set the error phase if the error code is different than duplicate_wake_up_detected or stt-no-text-recognized
     # These two are ignored for a better user experience
