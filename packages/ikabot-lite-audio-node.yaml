@@ -52,6 +52,7 @@ api:
         condition:
           switch.is_on: ikabot_audio_only_mode
         then:
+          - switch.turn_off: speaker_mute_switch
           - voice_assistant.stop:
           - micro_wake_word.stop:
 
@@ -133,6 +134,7 @@ script:
     parameters:
       token: string
     then:
+      - switch.turn_off: speaker_mute_switch
       - media_player.stop:
           id: external_media_player
           announcement: true
@@ -204,6 +206,7 @@ script:
     parameters:
       token: string
     then:
+      - switch.turn_off: speaker_mute_switch
       - media_player.stop:
           id: external_media_player
           announcement: true
