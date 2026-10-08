@@ -42,7 +42,7 @@ api:
 ota:
   - platform: esphome
     id: ota_esphome
-    password: !secret ikabot_xvf_ota_password
+    encryption:
 
 # Initial recommendation: enable Beam Lock from Home Assistant after the first
 # basic microphone test. Keeping it user-switchable makes A/B testing easy.
