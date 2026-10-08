@@ -336,6 +336,10 @@ micro_wake_word:
                                   - homeassistant.action:
                                       action: script.ikabot_baisse_volume_freebox
 
+                                  - script.execute:
+                                      id: ikabot_diag_wake
+                                      wake_word: !lambda return wake_word;
+
                                   - lambda: |-
                                       id(ikabot_pending_wake_word) = wake_word;
                                       id(ikabot_session_token) = std::to_string(millis());
@@ -388,6 +392,10 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
   on_error:
+    - script.execute:
+        id: ikabot_diag_error
+        message: !lambda 'return message;'
+
     # Only set the error phase if the error code is different than duplicate_wake_up_detected or stt-no-text-recognized
     # These two are ignored for a better user experience
     - if:
@@ -410,6 +418,7 @@ voice_assistant:
               sound_file: "error_cloud_expired"
   # A new VA turn starts only after the Lite confirmed the activation phrase.
   on_start:
+    - script.execute: ikabot_diag_pipeline_start
     - lambda: |-
         // New token for each VA turn. This prevents a delayed ACK from the
         // previous turn from finishing the next TTS during continue_conversation.
@@ -420,12 +429,15 @@ voice_assistant:
         id(ikabot_tts_decision_known) = false;
         id(ikabot_pending_tts_uri).clear();
   on_listening:
+    - script.execute: ikabot_diag_listening
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_start:
+    - script.execute: ikabot_diag_vad_start
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_end:
+    - script.execute: ikabot_diag_vad_end
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - lambda: id(respeaker).unlock_beam();
     - script.execute: control_leds
@@ -435,6 +447,12 @@ voice_assistant:
         event: esphome.ikabot_xvf_waiting_requested
         data:
           token: !lambda return id(ikabot_session_token);
+  on_intent_start:
+    - script.execute: ikabot_diag_intent_start
+
+  on_intent_end:
+    - script.execute: ikabot_diag_intent_end
+
   on_intent_progress:
     - if:
         condition:
@@ -453,6 +471,10 @@ voice_assistant:
                     uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_tts_start:
+    - script.execute:
+        id: ikabot_diag_tts_start
+        text: !lambda 'return x;'
+
     - lambda: |-
         std::string response = x;
         const auto first = response.find_first_not_of(" \\t\\r\\n");
@@ -492,6 +514,7 @@ voice_assistant:
                     uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_tts_end:
+    - script.execute: ikabot_diag_tts_end
     - lambda: |-
         if (!x.empty())
           id(ikabot_pending_tts_uri) = x;
@@ -513,6 +536,10 @@ voice_assistant:
               uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_stt_end:
+    - script.execute:
+        id: ikabot_diag_stt_end
+        text: !lambda 'return x;'
+
     - script.execute:
         id: send_stt_text_event
         stt_text: !lambda 'return x;'
@@ -565,6 +592,7 @@ voice_assistant:
     - script.execute: control_leds
     - homeassistant.action:
         action: script.ikabot_restaure_volume_freebox
+    - script.execute: ikabot_diag_idle
   on_timer_finished:
     - switch.turn_on: timer_ringing
     - lambda: |
