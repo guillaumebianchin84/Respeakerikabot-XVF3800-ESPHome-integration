@@ -19,6 +19,7 @@ esphome:
           condition:
             switch.is_on: ikabot_audio_only_mode
           then:
+            - switch.turn_off: speaker_mute_switch
             - voice_assistant.stop:
             - micro_wake_word.stop:
             - logger.log:
@@ -34,6 +35,7 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
+      - switch.turn_off: speaker_mute_switch
       - voice_assistant.stop:
       - micro_wake_word.stop:
       - logger.log:
@@ -253,6 +255,9 @@ script:
       uri: string
       token: string
     then:
+      # Audio-only node must never stay hardware-muted.
+      - switch.turn_off: speaker_mute_switch
+
       # Interrupt the waiting phrase immediately when the real answer arrives.
       - media_player.stop:
           id: external_media_player
