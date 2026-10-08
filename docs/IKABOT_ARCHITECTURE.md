@@ -118,3 +118,27 @@ Sans cette autorisation :
 4. Flasher le XVF avec `config/ikabot-xvf3800.yaml`.
 5. Vérifier les noms des actions ESPHome créées dans Home Assistant.
 6. Tester dans cet ordre : activation -> STT -> attente -> TTS -> conversation continue.
+
+
+## Enregistrements STT de diagnostic
+
+Conserver le fonctionnement actuel qui permet d'écouter les derniers fichiers WAV
+envoyés au STT.
+
+Cette fonction est côté **Home Assistant**, pas côté ReSpeaker Lite ou XVF3800.
+La capture reste donc compatible quand le microphone principal passe sur le XVF3800.
+
+Configuration Home Assistant attendue :
+
+```yaml
+assist_pipeline:
+  debug_recording_dir: /share/assist_pipeline
+```
+
+Exigence Ikabot : ne conserver que les **5 enregistrements STT les plus récents**
+dans `/share/assist_pipeline`, comme sur l'installation actuelle.
+
+IMPORTANT : la logique exacte de purge des anciens enregistrements n'est pas
+présente dans le YAML ReSpeaker Lite fourni. Avant la bascule finale, vérifier
+la méthode actuellement utilisée dans Home Assistant et la conserver. Si elle
+n'existe plus, recréer une purge limitée aux 5 derniers enregistrements.
