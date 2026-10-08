@@ -299,71 +299,83 @@ micro_wake_word:
   vad:
     probability_cutoff: 0.05
   on_wake_word_detected:
+    # "Stop" is a hard reset command. It must remain effective even while the
+    # Lite is playing activation/waiting/TTS audio, so test it BEFORE the
+    # self-voice guards used for the other wake words.
     - if:
         condition:
-          switch.is_off: mic_mute_switch
+          lambda: |-
+            return wake_word == "Stop" ||
+                   wake_word == "stop" ||
+                   wake_word == "STOP";
         then:
-          # Ignore our own speech while external TTS is active.
+          - script.execute: ikabot_stop_everything
+        else:
           - if:
               condition:
-                media_player.is_announcing:
-                  id: ikabot_proxy_player
+                switch.is_off: mic_mute_switch
               then:
-                - logger.log:
-                    level: DEBUG
-                    format: "IKABOT: wake ignored during external TTS"
-              else:
+                # Ignore normal wake words while external TTS is active.
                 - if:
                     condition:
-                      lambda: return id(ikabot_waiting_activation);
+                      media_player.is_announcing:
+                        id: ikabot_proxy_player
                     then:
                       - logger.log:
                           level: DEBUG
-                          format: "IKABOT: wake ignored while activation sound is pending"
+                          format: "IKABOT: wake ignored during external TTS"
                     else:
                       - if:
                           condition:
-                            switch.is_on: timer_ringing
+                            lambda: return id(ikabot_waiting_activation);
                           then:
-                            - switch.turn_off: timer_ringing
+                            - logger.log:
+                                level: DEBUG
+                                format: "IKABOT: wake ignored while activation sound is pending"
                           else:
                             - if:
                                 condition:
-                                  voice_assistant.is_running:
+                                  switch.is_on: timer_ringing
                                 then:
-                                  - voice_assistant.stop:
+                                  - switch.turn_off: timer_ringing
                                 else:
-                                  - homeassistant.action:
-                                      action: script.ikabot_baisse_volume_freebox
-
-                                  - script.execute:
-                                      id: ikabot_diag_wake
-                                      wake_word: !lambda return wake_word;
-
-                                  - lambda: |-
-                                      id(ikabot_pending_wake_word) = wake_word;
-                                      id(ikabot_session_token) = std::to_string(millis());
-                                      id(ikabot_waiting_activation) = true;
-                                      id(ikabot_tts_dispatched) = false;
-                                      id(ikabot_suppress_tts) = false;
-
                                   - if:
                                       condition:
-                                        switch.is_on: beam_lock_enabled
+                                        voice_assistant.is_running:
                                       then:
-                                        - lambda: id(respeaker).lock_beam();
+                                        - voice_assistant.stop:
+                                      else:
+                                        - homeassistant.action:
+                                            action: script.ikabot_baisse_volume_freebox
 
-                                  - homeassistant.event:
-                                      event: esphome.ikabot_xvf_activation_requested
-                                      data:
-                                        wake_word: !lambda return wake_word;
-                                        token: !lambda return id(ikabot_session_token);
+                                        - script.execute:
+                                            id: ikabot_diag_wake
+                                            wake_word: !lambda return wake_word;
 
-                                  - script.execute: ikabot_activation_watchdog
-        else:
-          - logger.log:
-              level: INFO
-              format: "IKABOT: wake ignored, microphone muted"
+                                        - lambda: |-
+                                            id(ikabot_pending_wake_word) = wake_word;
+                                            id(ikabot_session_token) = std::to_string(millis());
+                                            id(ikabot_waiting_activation) = true;
+                                            id(ikabot_tts_dispatched) = false;
+                                            id(ikabot_suppress_tts) = false;
+
+                                        - if:
+                                            condition:
+                                              switch.is_on: beam_lock_enabled
+                                            then:
+                                              - lambda: id(respeaker).lock_beam();
+
+                                        - homeassistant.event:
+                                            event: esphome.ikabot_xvf_activation_requested
+                                            data:
+                                              wake_word: !lambda return wake_word;
+                                              token: !lambda return id(ikabot_session_token);
+
+                                        - script.execute: ikabot_activation_watchdog
+              else:
+                - logger.log:
+                    level: INFO
+                    format: "IKABOT: wake ignored, microphone muted"
 
 voice_assistant:
   id: va
@@ -659,6 +671,57 @@ interval:
             - micro_wake_word.start:
 
 script:
+  # Global hard-stop requested by the dedicated "Stop" wake word.
+  # Leaves both ESPHome nodes and the house audio in a known ready state.
+  - id: ikabot_stop_everything
+    mode: restart
+    then:
+      - logger.log:
+          level: WARN
+          format: "IKABOT: STOP -> abort everything and return to ready"
+
+      - script.stop: ikabot_activation_watchdog
+      - script.stop: ikabot_dispatch_tts
+
+      # Stop any timer/alarm state owned by the XVF.
+      - switch.turn_off: timer_ringing
+
+      # Stop the real audio node through Home Assistant.
+      - homeassistant.event:
+          event: esphome.ikabot_xvf_stop_audio
+          data:
+            token: !lambda return id(ikabot_session_token);
+
+      # Reset the logical proxy immediately. Do not wait for an ACK from the
+      # Lite: STOP must always leave the XVF ready, even if HA/Lite is delayed.
+      - lambda: |-
+          id(ikabot_proxy_player).external_failed();
+          id(ikabot_waiting_activation) = false;
+          id(ikabot_tts_dispatched) = false;
+          id(ikabot_suppress_tts) = false;
+          id(ikabot_tts_decision_known) = false;
+          id(ikabot_pending_tts_uri).clear();
+          id(ikabot_pending_wake_word).clear();
+          id(respeaker).unlock_beam();
+          id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+
+      - voice_assistant.stop:
+
+      # Also stop any local XVF announcement path that may still be active
+      # (timer/button sounds from the upstream package).
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+
+      - script.execute: control_leds
+
+      # Restore the Freebox/Google volume even when STOP happened before the
+      # Voice Assistant had actually started.
+      - homeassistant.action:
+          action: script.ikabot_restaure_volume_freebox
+
+      - script.execute: ikabot_diag_idle
+
   - id: ikabot_activation_watchdog
     mode: restart
     then:
