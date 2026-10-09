@@ -48,3 +48,26 @@ jobs:
 
       - name: Compile ReSpeaker Lite audio-node overlay
         run: esphome compile config/ikabot-lite-audio-node-ci.yaml
+
+  validate-lite-audio-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome 2026.9.0
+        run: python -m pip install --upgrade pip "esphome==2026.9.0"
+      - name: Create test secrets
+        run: |
+          cat > config/secrets.yaml <<'EOF'
+          wifi_ssid: "TEST_WIFI"
+          wifi_password: "TEST_PASSWORD_123456"
+          ikabot_lite_api_encryption_key: "YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk="
+          ikabot_lite_ota_password: "TEST_LITE_OTA_PASSWORD"
+          EOF
+      - name: Validate Lite audio-only candidate
+        run: esphome config config/ikabot-lite-audio-only-ci.yaml
+      - name: Compile Lite audio-only candidate
+        run: esphome compile config/ikabot-lite-audio-only-ci.yaml
