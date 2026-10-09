@@ -19,6 +19,8 @@ class IkabotProxyMediaPlayer final : public Component, public media_player::Medi
   void external_started();
   void external_finished();
   void external_failed();
+  // Cancel a silent response without waiting for an external TTS FINISH ACK.
+  void cancel_pending();
 
   const std::string &get_pending_url() const { return this->pending_url_; }
 
