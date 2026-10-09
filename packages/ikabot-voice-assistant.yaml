@@ -570,7 +570,9 @@ voice_assistant:
                 token: !lambda return id(ikabot_session_token);
           - homeassistant.action:
               action: script.ikabot_restaure_volume_freebox
-          - script.execute: ikabot_ok_action_recovery
+          - script.execute:
+              id: ikabot_ok_action_recovery
+              token: !lambda return id(ikabot_session_token);
         else:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
@@ -786,11 +788,13 @@ script:
   # Token/flag guards prevent an old recovery from affecting a newer turn.
   - id: ikabot_ok_action_recovery
     mode: restart
+    parameters:
+      token: string
     then:
       - delay: 3s
       - if:
           condition:
-            lambda: return id(ikabot_suppress_tts);
+            lambda: return token == id(ikabot_session_token) && id(ikabot_suppress_tts);
           then:
             - if:
                 condition:
