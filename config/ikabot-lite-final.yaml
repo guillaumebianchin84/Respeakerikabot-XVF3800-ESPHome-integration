@@ -1,6 +1,3 @@
-substitutions:
-  wake_word_triggered_sound_file: "/config/esphome/sounds/activation/01_oui.mp3"
-
 # ReSpeaker Lite = sortie audio uniquement.
 # Le XVF3800 est le seul noeud qui ecoute les wake words et execute le pipeline vocal.
 packages:
