@@ -1,4 +1,4 @@
-# Ikabot Lite - base audio uniquement (brouillon non active)
+# Ikabot Lite - base audio uniquement (active via config/ikabot-lite-final.yaml)
 # Conserve l'identite du lecteur et la sortie I2S/DAC; aucune entree micro.
 esp32:
   board: esp32-s3-devkitc-1
@@ -126,3 +126,7 @@ text_sensor:
   - platform: debug
     reset_reason:
       name: Ikabot Lite Raison redemarrage
+
+button:
+  - platform: restart
+    name: Redemarrer Ikabot Lite
