@@ -1,5 +1,60 @@
-# Ikabot Lite audio-only: XVF owns voice, Lite owns audio playback.
+# =============================================================================
+# IKABOT - ReSpeaker Lite audio node overlay
+#
+# Include this package in the EXISTING Ikabot Lite configuration.
+# It keeps the Lite as the only physical audio output (jack -> speakers) while
+# the XVF3800 becomes the microphone / Voice Assistant node.
+#
+# Assumptions from the current Ikabot configuration:
+#   - media_player id: external_media_player
+#   - audio_file ids activation_01..activation_15
+#   - audio_file ids attente_01..attente_20
+# =============================================================================
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - if:
+          condition:
+            switch.is_on: ikabot_audio_only_mode
+          then:
+            - voice_assistant.stop:
+            - micro_wake_word.stop:
+            - logger.log:
+                level: INFO
+                format: "IKABOT AUDIO NODE: boot in audio-only mode"
+
+switch:
+  - platform: template
+    id: ikabot_audio_only_mode
+    name: "Ikabot Audio Only Mode"
+    icon: mdi:speaker
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - voice_assistant.stop:
+      - micro_wake_word.stop:
+      - logger.log:
+          level: INFO
+          format: "IKABOT AUDIO NODE: voice input disabled"
+    turn_off_action:
+      - micro_wake_word.start:
+      - logger.log:
+          level: WARN
+          format: "IKABOT AUDIO NODE: local wake word re-enabled"
+
 api:
+  on_client_connected:
+    - delay: 500ms
+    - if:
+        condition:
+          switch.is_on: ikabot_audio_only_mode
+        then:
+          - voice_assistant.stop:
+          - micro_wake_word.stop:
+
   actions:
     - action: ikabot_play_activation
       variables:
@@ -78,7 +133,6 @@ script:
     parameters:
       token: string
     then:
-      - switch.turn_off: speaker_mute_switch
       - media_player.stop:
           id: external_media_player
           announcement: true
@@ -150,7 +204,6 @@ script:
     parameters:
       token: string
     then:
-      - switch.turn_off: speaker_mute_switch
       - media_player.stop:
           id: external_media_player
           announcement: true
@@ -197,9 +250,6 @@ script:
       uri: string
       token: string
     then:
-      # Audio-only node must never stay hardware-muted.
-      - switch.turn_off: speaker_mute_switch
-
       # Interrupt the waiting phrase immediately when the real answer arrives.
       - media_player.stop:
           id: external_media_player
