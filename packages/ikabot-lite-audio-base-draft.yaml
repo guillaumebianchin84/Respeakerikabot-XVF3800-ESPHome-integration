@@ -100,6 +100,8 @@ media_player:
     volume_increment: 0.05
     volume_min: 0.4
     volume_max: 0.85
+logger:
+  level: INFO
 debug:
   update_interval: 30s
 sensor:
