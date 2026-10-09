@@ -1,0 +1,379 @@
+# =============================================================================
+# IKABOT XVF3800 — diagnostics
+#
+# Port of the useful diagnostic instrumentation from the current ReSpeaker Lite.
+# Audio tuning controls are NOT copied: the XVF3800 DSP uses its own ASR/AGC/
+# route/beam controls from hardware.yaml and ikabot-voice-assistant.yaml.
+# =============================================================================
+
+globals:
+  - id: ikabot_diag_trace_num
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: ikabot_diag_pipeline_start_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_listening_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_vad_start_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_vad_end_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_stt_end_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_intent_start_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_intent_end_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_tts_start_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ikabot_diag_tts_end_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+text_sensor:
+  - platform: template
+    id: ikabot_xvf_etat
+    name: "Ikabot XVF Etat"
+    icon: mdi:robot
+
+  - platform: template
+    id: ikabot_xvf_derniere_requete
+    name: "Ikabot XVF Derniere requete"
+    icon: mdi:microphone-message
+
+  - platform: template
+    id: ikabot_xvf_derniere_reponse
+    name: "Ikabot XVF Derniere reponse"
+    icon: mdi:message-reply-text
+
+  - platform: template
+    id: ikabot_xvf_derniere_erreur
+    name: "Ikabot XVF Derniere erreur"
+    icon: mdi:alert-circle
+
+  - platform: template
+    id: ikabot_xvf_trace
+    name: "Ikabot XVF Trace"
+    icon: mdi:timeline-text
+    entity_category: diagnostic
+
+  - platform: template
+    id: ikabot_xvf_dernier_wake_word
+    name: "Ikabot XVF Dernier wake word"
+    icon: mdi:ear-hearing
+    entity_category: diagnostic
+
+  - platform: template
+    id: ikabot_xvf_dernier_wake_word_heure
+    name: "Ikabot XVF Heure dernier wake word"
+    icon: mdi:clock-outline
+    entity_category: diagnostic
+
+  - platform: template
+    id: ikabot_xvf_derniere_requete_heure
+    name: "Ikabot XVF Heure derniere requete"
+    icon: mdi:clock-outline
+    entity_category: diagnostic
+
+  - platform: template
+    id: ikabot_xvf_derniere_reponse_heure
+    name: "Ikabot XVF Heure derniere reponse"
+    icon: mdi:clock-outline
+    entity_category: diagnostic
+
+  - platform: template
+    id: ikabot_xvf_latences_pipeline
+    name: "Ikabot XVF Latences pipeline"
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+
+  - platform: debug
+    reset_reason:
+      name: "Ikabot XVF Raison dernier redemarrage"
+      entity_category: diagnostic
+
+sensor:
+  - platform: debug
+    free:
+      name: "Ikabot XVF Heap libre"
+      entity_category: diagnostic
+    min_free:
+      name: "Ikabot XVF Heap minimum"
+      entity_category: diagnostic
+    block:
+      name: "Ikabot XVF Plus gros bloc memoire"
+      entity_category: diagnostic
+    fragmentation:
+      name: "Ikabot XVF Fragmentation memoire"
+      entity_category: diagnostic
+    psram:
+      name: "Ikabot XVF PSRAM libre"
+      entity_category: diagnostic
+    loop_time:
+      name: "Ikabot XVF Loop Time"
+      entity_category: diagnostic
+
+  - platform: internal_temperature
+    name: "Ikabot XVF Temperature ESP32"
+    id: ikabot_xvf_temperature_esp32
+    update_interval: 30s
+    entity_category: diagnostic
+
+  - platform: uptime
+    type: seconds
+    name: "Ikabot XVF Uptime"
+    id: ikabot_xvf_uptime
+    update_interval: 30s
+    entity_category: diagnostic
+
+  - platform: wifi_signal
+    name: "Ikabot XVF Signal WiFi"
+    id: ikabot_xvf_signal_wifi
+    update_interval: 30s
+    entity_category: diagnostic
+
+script:
+  - id: ikabot_diag_trace_event
+    mode: queued
+    parameters:
+      evenement: string
+    then:
+      - lambda: |-
+          auto now = id(homeassistant_time).now();
+          id(ikabot_diag_trace_num)++;
+          std::string trace =
+            std::string("#") +
+            std::to_string(id(ikabot_diag_trace_num)) +
+            std::string(" ");
+          if (now.is_valid()) {
+            trace += now.strftime("%H:%M:%S");
+            trace += std::string(" - ");
+          }
+          trace += evenement;
+          id(ikabot_xvf_trace).publish_state(trace);
+
+  - id: ikabot_diag_wake
+    mode: queued
+    parameters:
+      wake_word: string
+    then:
+      - lambda: |-
+          id(ikabot_xvf_dernier_wake_word).publish_state(wake_word);
+          auto now = id(homeassistant_time).now();
+          if (now.is_valid()) {
+            id(ikabot_xvf_dernier_wake_word_heure).publish_state(
+              now.strftime("%d/%m/%Y %H:%M:%S")
+            );
+          }
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: !lambda return std::string("WAKE - ") + wake_word;
+
+  - id: ikabot_diag_pipeline_start
+    mode: restart
+    then:
+      - lambda: |-
+          id(ikabot_diag_pipeline_start_ms) = millis();
+          id(ikabot_diag_listening_ms) = 0;
+          id(ikabot_diag_vad_start_ms) = 0;
+          id(ikabot_diag_vad_end_ms) = 0;
+          id(ikabot_diag_stt_end_ms) = 0;
+          id(ikabot_diag_intent_start_ms) = 0;
+          id(ikabot_diag_intent_end_ms) = 0;
+          id(ikabot_diag_tts_start_ms) = 0;
+          id(ikabot_diag_tts_end_ms) = 0;
+          id(ikabot_xvf_etat).publish_state("Demarrage");
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "PIPELINE DEMARRAGE"
+
+  - id: ikabot_diag_listening
+    mode: restart
+    then:
+      - lambda: |-
+          id(ikabot_diag_listening_ms) = millis();
+          id(ikabot_xvf_etat).publish_state("Ecoute");
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "ECOUTE"
+
+  - id: ikabot_diag_vad_start
+    mode: restart
+    then:
+      - lambda: id(ikabot_diag_vad_start_ms) = millis();
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "VAD DEBUT PAROLE"
+
+  - id: ikabot_diag_vad_end
+    mode: restart
+    then:
+      - lambda: |-
+          id(ikabot_diag_vad_end_ms) = millis();
+          id(ikabot_xvf_etat).publish_state("Transcription");
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "VAD FIN PAROLE"
+
+  - id: ikabot_diag_stt_end
+    mode: queued
+    parameters:
+      text: string
+    then:
+      - lambda: |-
+          id(ikabot_diag_stt_end_ms) = millis();
+          id(ikabot_xvf_derniere_requete).publish_state(text);
+          id(ikabot_xvf_etat).publish_state("Traitement");
+          auto now = id(homeassistant_time).now();
+          if (now.is_valid()) {
+            id(ikabot_xvf_derniere_requete_heure).publish_state(
+              now.strftime("%d/%m/%Y %H:%M:%S")
+            );
+          }
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "STT FIN"
+
+  - id: ikabot_diag_intent_start
+    mode: restart
+    then:
+      - lambda: id(ikabot_diag_intent_start_ms) = millis();
+
+  - id: ikabot_diag_intent_end
+    mode: restart
+    then:
+      - lambda: id(ikabot_diag_intent_end_ms) = millis();
+
+  - id: ikabot_diag_tts_start
+    mode: queued
+    parameters:
+      text: string
+    then:
+      - lambda: |-
+          id(ikabot_diag_tts_start_ms) = millis();
+          id(ikabot_xvf_derniere_reponse).publish_state(text);
+          id(ikabot_xvf_etat).publish_state("Reponse");
+
+          auto now = id(homeassistant_time).now();
+          if (now.is_valid()) {
+            id(ikabot_xvf_derniere_reponse_heure).publish_state(
+              now.strftime("%d/%m/%Y %H:%M:%S")
+            );
+          }
+
+          auto delta = [](uint32_t fin, uint32_t debut) -> uint32_t {
+            if (fin == 0 || debut == 0) return 0;
+            return fin - debut;
+          };
+
+          uint32_t parole_ms =
+            delta(id(ikabot_diag_vad_end_ms), id(ikabot_diag_vad_start_ms));
+          uint32_t stt_ms =
+            delta(id(ikabot_diag_stt_end_ms), id(ikabot_diag_vad_end_ms));
+          uint32_t attente_intent_ms =
+            delta(id(ikabot_diag_intent_start_ms), id(ikabot_diag_stt_end_ms));
+          uint32_t intent_ms =
+            delta(id(ikabot_diag_intent_end_ms), id(ikabot_diag_intent_start_ms));
+          uint32_t apres_intent_ms =
+            delta(id(ikabot_diag_tts_start_ms), id(ikabot_diag_intent_end_ms));
+          uint32_t total_ms =
+            delta(id(ikabot_diag_tts_start_ms), id(ikabot_diag_vad_end_ms));
+
+          char buffer[240];
+          snprintf(
+            buffer,
+            sizeof(buffer),
+            "Parole %ums | STT %ums | attente intent %ums | conversation %ums | vers TTS %ums | total avant TTS %ums",
+            parole_ms,
+            stt_ms,
+            attente_intent_ms,
+            intent_ms,
+            apres_intent_ms,
+            total_ms
+          );
+          id(ikabot_xvf_latences_pipeline).publish_state(buffer);
+
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "TTS TEXTE PRET"
+
+  - id: ikabot_diag_tts_end
+    mode: restart
+    then:
+      - lambda: |-
+          id(ikabot_diag_tts_end_ms) = millis();
+
+          auto delta = [](uint32_t fin, uint32_t debut) -> uint32_t {
+            if (fin == 0 || debut == 0) return 0;
+            return fin - debut;
+          };
+
+          uint32_t stt_ms =
+            delta(id(ikabot_diag_stt_end_ms), id(ikabot_diag_vad_end_ms));
+          uint32_t attente_intent_ms =
+            delta(id(ikabot_diag_intent_start_ms), id(ikabot_diag_stt_end_ms));
+          uint32_t intent_ms =
+            delta(id(ikabot_diag_intent_end_ms), id(ikabot_diag_intent_start_ms));
+          uint32_t apres_intent_ms =
+            delta(id(ikabot_diag_tts_start_ms), id(ikabot_diag_intent_end_ms));
+          uint32_t synthese_tts_ms =
+            delta(id(ikabot_diag_tts_end_ms), id(ikabot_diag_tts_start_ms));
+          uint32_t total_ms =
+            delta(id(ikabot_diag_tts_end_ms), id(ikabot_diag_vad_end_ms));
+
+          char buffer[260];
+          snprintf(
+            buffer,
+            sizeof(buffer),
+            "STT %ums | attente intent %ums | conversation %ums | vers TTS %ums | synthese TTS %ums | total audio pret %ums",
+            stt_ms,
+            attente_intent_ms,
+            intent_ms,
+            apres_intent_ms,
+            synthese_tts_ms,
+            total_ms
+          );
+          id(ikabot_xvf_latences_pipeline).publish_state(buffer);
+
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "TTS URL PRETE"
+
+  - id: ikabot_diag_error
+    mode: queued
+    parameters:
+      message: string
+    then:
+      - lambda: |-
+          id(ikabot_xvf_etat).publish_state("Erreur");
+          id(ikabot_xvf_derniere_erreur).publish_state(message);
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "ERREUR VOICE ASSISTANT"
+
+  - id: ikabot_diag_idle
+    mode: restart
+    then:
+      - lambda: id(ikabot_xvf_etat).publish_state("Repos");
+      - script.execute:
+          id: ikabot_diag_trace_event
+          evenement: "IDLE"

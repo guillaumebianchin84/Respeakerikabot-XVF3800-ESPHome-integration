@@ -1,0 +1,144 @@
+# Architecture Ikabot XVF3800 + ReSpeaker Lite
+
+## Décision
+
+- **XVF3800 au plafond** : micros, DSP XVF3800, beamforming, wake word, VAD, STT, Voice Assistant, conversation continue et LEDs.
+- **ReSpeaker Lite** : unique sortie audio physique via jack vers l'enceinte Ikabot.
+- Les MP3 d'activation et d'attente restent stockés localement sur le Lite.
+- Le TTS est lu directement par le Lite.
+- Le Lite est l'autorité sur la **fin réelle** de lecture.
+- Home Assistant ne transporte pas l'audio entre les deux ESP32 : il ne transporte que les ordres, l'URL TTS et les ACK.
+
+## Pourquoi un proxy media_player sur le XVF
+
+Ne pas simplement supprimer `media_player` du `voice_assistant` XVF.
+
+ESPHome utilise la présence d'une sortie locale pour maintenir l'état
+`STREAMING_RESPONSE`, puis passe à `RESPONSE_FINISHED`. C'est à ce moment
+qu'il consulte `continue_conversation` et rouvre le microphone si nécessaire.
+
+Le composant `ikabot_proxy_media_player` ne décode aucun son. Il sert uniquement
+de miroir d'état :
+
+1. le XVF reçoit l'URL TTS ;
+2. le proxy passe immédiatement en `ANNOUNCING` pour empêcher le timeout de
+   démarrage ESPHome ;
+3. Home Assistant transmet l'URL au Lite ;
+4. le Lite lit réellement le TTS ;
+5. le Lite renvoie START puis FIN ;
+6. sur FIN, le proxy passe à `IDLE` ;
+7. ESPHome Voice Assistant voit alors la fin de réponse et applique nativement
+   `continue_conversation`.
+
+Le Lite attend au maximum 70 s pour une lecture TTS. Le proxy XVF garde une marge et force la sortie à 80 s si l'ACK de fin se perd.
+
+## Séquence normale
+
+```text
+Utilisateur: "Ikabot"
+        |
+        v
+XVF wake word
+        |
+        +--> baisse volume Freebox
+        |
+        +--> event activation_requested
+                  |
+                  v
+            ReSpeaker Lite
+            MP3 activation local
+                  |
+                  +--> audio_finished
+                            |
+                            v
+                     XVF démarre VA
+                            |
+                       VAD / STT
+                            |
+          VAD END ----------+--> Lite joue MP3 attente
+                            |
+                      Conversation
+                            |
+                         TTS URI
+                            |
+                     proxy ANNOUNCING
+                            |
+                            +--> HA --> Lite
+                                      |
+                                  TTS réel
+                                      |
+                               audio_finished
+                                      |
+                                      v
+                                proxy IDLE
+                                      |
+                     +----------------+----------------+
+                     |                                 |
+            continue_conversation=true        false
+                     |                                 |
+               XVF réécoute                     retour wake
+```
+
+## Cas spéciaux
+
+- **OK_ACTION** : l'URL de streaming est retenue jusqu'à lecture du texte TTS.
+  Si le texte vaut OK_ACTION, aucun TTS n'est envoyé au Lite ; tout audio
+  d'attente éventuel est arrêté et le volume est restauré.
+- **INCOMPRÉHENSIBLE** : arrêt silencieux, arrêt du son d'attente et restauration
+  du volume.
+- **Activation sans ACK** : watchdog 8 s, puis démarrage de l'écoute pour ne pas
+  laisser Ikabot bloqué.
+- **TTS sans ACK de fin** : watchdog proxy 70 s.
+- **Wake pendant TTS** : ignoré pour éviter qu'Ikabot ne s'interrompe lui-même.
+
+## Fichiers Ikabot
+
+- `config/ikabot-xvf3800.yaml` : configuration du futur XVF.
+- `packages/ikabot-voice-assistant.yaml` : logique XVF adaptée.
+- `packages/ikabot-lite-audio-node.yaml` : overlay à ajouter au Lite actuel.
+- `ha/ikabot_audio_bridge.yaml` : automations Home Assistant.
+- `esphome/components/ikabot_proxy_media_player/` : proxy d'état de lecture.
+
+## Autorisations Home Assistant indispensables
+
+Les deux ESPHome doivent pouvoir émettre des événements et appeler des actions
+Home Assistant. Après ajout de chaque appareil dans l'intégration ESPHome,
+activer l'option **Allow the device to perform Home Assistant actions**.
+
+Sans cette autorisation :
+- le XVF ne pourra pas demander les sons au Lite ni agir sur le volume Freebox ;
+- le Lite ne pourra pas renvoyer ses ACK de lecture à Home Assistant.
+
+## Avant le premier flash
+
+1. Ajouter au `secrets.yaml` local :
+   `ikabot_xvf_api_encryption_key` et `ikabot_xvf_ota_password`.
+2. Inclure `packages/ikabot-lite-audio-node.yaml` dans le YAML principal du Lite.
+3. Importer les automations de `ha/ikabot_audio_bridge.yaml`.
+4. Flasher le XVF avec `config/ikabot-xvf3800.yaml`.
+5. Vérifier les noms des actions ESPHome créées dans Home Assistant.
+6. Tester dans cet ordre : activation -> STT -> attente -> TTS -> conversation continue.
+
+
+## Enregistrements STT de diagnostic
+
+Conserver le fonctionnement actuel qui permet d'écouter les derniers fichiers WAV
+envoyés au STT.
+
+Cette fonction est côté **Home Assistant**, pas côté ReSpeaker Lite ou XVF3800.
+La capture reste donc compatible quand le microphone principal passe sur le XVF3800.
+
+Configuration Home Assistant attendue :
+
+```yaml
+assist_pipeline:
+  debug_recording_dir: /share/assist_pipeline
+```
+
+Exigence Ikabot : ne conserver que les **5 enregistrements STT les plus récents**
+dans `/share/assist_pipeline`, comme sur l'installation actuelle.
+
+IMPORTANT : la logique exacte de purge des anciens enregistrements n'est pas
+présente dans le YAML ReSpeaker Lite fourni. Avant la bascule finale, vérifier
+la méthode actuellement utilisée dans Home Assistant et la conserver. Si elle
+n'existe plus, recréer une purge limitée aux 5 derniers enregistrements.

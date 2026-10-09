@@ -1,0 +1,310 @@
+# =============================================================================
+# IKABOT - ReSpeaker Lite audio node overlay
+#
+# Include this package in the EXISTING Ikabot Lite configuration.
+# It keeps the Lite as the only physical audio output (jack -> speakers) while
+# the XVF3800 becomes the microphone / Voice Assistant node.
+#
+# Assumptions from the current Ikabot configuration:
+#   - media_player id: external_media_player
+#   - audio_file ids activation_01..activation_15
+#   - audio_file ids attente_01..attente_20
+# =============================================================================
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - if:
+          condition:
+            switch.is_on: ikabot_audio_only_mode
+          then:
+            - voice_assistant.stop:
+            - micro_wake_word.stop:
+            - logger.log:
+                level: INFO
+                format: "IKABOT AUDIO NODE: boot in audio-only mode"
+
+switch:
+  - platform: template
+    id: ikabot_audio_only_mode
+    name: "Ikabot Audio Only Mode"
+    icon: mdi:speaker
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - voice_assistant.stop:
+      - micro_wake_word.stop:
+      - logger.log:
+          level: INFO
+          format: "IKABOT AUDIO NODE: voice input disabled"
+    turn_off_action:
+      - micro_wake_word.start:
+      - logger.log:
+          level: WARN
+          format: "IKABOT AUDIO NODE: local wake word re-enabled"
+
+api:
+  on_client_connected:
+    - delay: 500ms
+    - if:
+        condition:
+          switch.is_on: ikabot_audio_only_mode
+        then:
+          - voice_assistant.stop:
+          - micro_wake_word.stop:
+
+  actions:
+    - action: ikabot_play_activation
+      variables:
+        token: string
+      then:
+        - script.execute:
+            id: ikabot_audio_play_activation
+            token: !lambda return token;
+
+    - action: ikabot_play_waiting
+      variables:
+        token: string
+      then:
+        - script.execute:
+            id: ikabot_audio_play_waiting
+            token: !lambda return token;
+
+    - action: ikabot_play_tts
+      variables:
+        uri: string
+        token: string
+      then:
+        - script.execute:
+            id: ikabot_audio_play_tts
+            uri: !lambda return uri;
+            token: !lambda return token;
+
+    - action: ikabot_stop_audio
+      then:
+        - media_player.stop:
+            id: external_media_player
+            announcement: true
+
+script:
+  - id: ikabot_audio_publish_started
+    mode: queued
+    parameters:
+      kind: string
+      token: string
+    then:
+      - homeassistant.event:
+          event: esphome.ikabot_audio_started
+          data:
+            source: "ikabot_lite"
+            kind: !lambda return kind;
+            token: !lambda return token;
+
+  - id: ikabot_audio_publish_finished
+    mode: queued
+    parameters:
+      kind: string
+      token: string
+    then:
+      - homeassistant.event:
+          event: esphome.ikabot_audio_finished
+          data:
+            source: "ikabot_lite"
+            kind: !lambda return kind;
+            token: !lambda return token;
+
+  - id: ikabot_audio_publish_failed
+    mode: queued
+    parameters:
+      kind: string
+      token: string
+    then:
+      - homeassistant.event:
+          event: esphome.ikabot_audio_failed
+          data:
+            source: "ikabot_lite"
+            kind: !lambda return kind;
+            token: !lambda return token;
+
+  - id: ikabot_audio_play_activation
+    mode: restart
+    parameters:
+      token: string
+    then:
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+
+      - lambda: |-
+          const char* sounds[] = {
+            "activation_01", "activation_02", "activation_03",
+            "activation_04", "activation_05", "activation_06",
+            "activation_07", "activation_08", "activation_09",
+            "activation_10", "activation_11", "activation_12",
+            "activation_13", "activation_14", "activation_15"
+          };
+          const uint32_t index = random_uint32() % 15;
+          id(external_media_player)
+            ->make_call()
+            .set_media_url(std::string("audio-file://") + sounds[index])
+            .set_announcement(true)
+            .perform();
+
+      - wait_until:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          timeout: 2s
+
+      - if:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          then:
+            - script.execute:
+                id: ikabot_audio_publish_started
+                kind: "activation"
+                token: !lambda return token;
+
+            - wait_until:
+                condition:
+                  not:
+                    media_player.is_announcing:
+                      id: external_media_player
+                timeout: 5s
+
+            - if:
+                condition:
+                  not:
+                    media_player.is_announcing:
+                      id: external_media_player
+                then:
+                  - script.execute:
+                      id: ikabot_audio_publish_finished
+                      kind: "activation"
+                      token: !lambda return token;
+                else:
+                  - media_player.stop:
+                      id: external_media_player
+                      announcement: true
+                  - script.execute:
+                      id: ikabot_audio_publish_failed
+                      kind: "activation"
+                      token: !lambda return token;
+          else:
+            - script.execute:
+                id: ikabot_audio_publish_failed
+                kind: "activation"
+                token: !lambda return token;
+
+  - id: ikabot_audio_play_waiting
+    mode: restart
+    parameters:
+      token: string
+    then:
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+
+      - lambda: |-
+          const char* sounds[] = {
+            "attente_01", "attente_02", "attente_03", "attente_04",
+            "attente_05", "attente_06", "attente_07", "attente_08",
+            "attente_09", "attente_10", "attente_11", "attente_12",
+            "attente_13", "attente_14", "attente_15", "attente_16",
+            "attente_17", "attente_18", "attente_19", "attente_20"
+          };
+          const uint32_t index = random_uint32() % 20;
+          id(external_media_player)
+            ->make_call()
+            .set_media_url(std::string("audio-file://") + sounds[index])
+            .set_announcement(true)
+            .perform();
+
+      - wait_until:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          timeout: 3s
+
+      - if:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          then:
+            - script.execute:
+                id: ikabot_audio_publish_started
+                kind: "waiting"
+                token: !lambda return token;
+          else:
+            - script.execute:
+                id: ikabot_audio_publish_failed
+                kind: "waiting"
+                token: !lambda return token;
+
+  - id: ikabot_audio_play_tts
+    mode: restart
+    parameters:
+      uri: string
+      token: string
+    then:
+      # Interrupt the waiting phrase immediately when the real answer arrives.
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+
+      - lambda: |-
+          id(external_media_player)
+            ->make_call()
+            .set_media_url(uri)
+            .set_announcement(true)
+            .perform();
+
+      - wait_until:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          timeout: 5s
+
+      - if:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          then:
+            - script.execute:
+                id: ikabot_audio_publish_started
+                kind: "tts"
+                token: !lambda return token;
+
+            - wait_until:
+                condition:
+                  not:
+                    media_player.is_announcing:
+                      id: external_media_player
+                timeout: 70s
+
+            - if:
+                condition:
+                  not:
+                    media_player.is_announcing:
+                      id: external_media_player
+                then:
+                  - script.execute:
+                      id: ikabot_audio_publish_finished
+                      kind: "tts"
+                      token: !lambda return token;
+                else:
+                  - media_player.stop:
+                      id: external_media_player
+                      announcement: true
+                  - script.execute:
+                      id: ikabot_audio_publish_failed
+                      kind: "tts"
+                      token: !lambda return token;
+          else:
+            - script.execute:
+                id: ikabot_audio_publish_failed
+                kind: "tts"
+                token: !lambda return token;

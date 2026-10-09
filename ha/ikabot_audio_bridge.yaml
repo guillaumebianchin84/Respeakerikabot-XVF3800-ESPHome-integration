@@ -1,0 +1,131 @@
+# =============================================================================
+# IKABOT - Home Assistant bridge: XVF3800 <-> ReSpeaker Lite
+#
+# Expected ESPHome node names:
+#   XVF3800: ikabot-xvf3800
+#   ReSpeaker Lite: ikabot
+#
+# If Home Assistant exposes slightly different action names after discovery,
+# adjust only the action: lines below.
+# =============================================================================
+
+- alias: "Ikabot - XVF activation vers Lite"
+  mode: restart
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_xvf_activation_requested
+  actions:
+    - action: esphome.ikabot_ikabot_play_activation
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - Lite activation ACK vers XVF"
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_audio_finished
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'activation' }}"
+  actions:
+    - action: esphome.ikabot_xvf3800_ikabot_activation_finished
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - Lite activation erreur vers XVF"
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_audio_failed
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'activation' }}"
+  actions:
+    - action: esphome.ikabot_xvf3800_ikabot_activation_failed
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - XVF son attente vers Lite"
+  mode: restart
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_xvf_waiting_requested
+  actions:
+    - action: esphome.ikabot_ikabot_play_waiting
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - XVF TTS vers Lite"
+  mode: restart
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_xvf_tts_uri
+  actions:
+    - action: esphome.ikabot_ikabot_play_tts
+      data:
+        uri: "{{ trigger.event.data.uri }}"
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - Lite TTS START vers XVF"
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_audio_started
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'tts' }}"
+  actions:
+    - action: esphome.ikabot_xvf3800_ikabot_external_tts_started
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - Lite TTS FIN vers XVF"
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_audio_finished
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'tts' }}"
+  actions:
+    - action: esphome.ikabot_xvf3800_ikabot_external_tts_finished
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - Lite TTS erreur vers XVF"
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_audio_failed
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.source == 'ikabot_lite' and trigger.event.data.kind == 'tts' }}"
+  actions:
+    - action: esphome.ikabot_xvf3800_ikabot_external_tts_failed
+      data:
+        token: "{{ trigger.event.data.token }}"
+
+- alias: "Ikabot - XVF stop audio vers Lite"
+  mode: restart
+  triggers:
+    - trigger: event
+      event_type: esphome.ikabot_xvf_stop_audio
+  actions:
+    - action: esphome.ikabot_ikabot_stop_audio
+
+
+- alias: "Ikabot - Archivage des 5 derniers WAV STT XVF"
+  description: >
+    Conserve automatiquement les 5 derniers enregistrements audio envoyés au STT
+    Ikabot. Le déclenchement se fait à la fin réelle du STT, via l'événement
+    esphome.stt_text émis par le XVF, puis laisse 2 secondes à Home Assistant
+    pour finaliser l'écriture du WAV avant l'archivage.
+  mode: restart
+  triggers:
+    - trigger: event
+      event_type: esphome.stt_text
+  conditions: []
+  actions:
+    - delay:
+        seconds: 2
+    - action: shell_command.ikabot_actualise_wav

@@ -1,0 +1,47 @@
+name: Package Ikabot
+
+on:
+  push:
+    branches:
+      - ikabot-integration
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build downloadable package
+        run: |
+          mkdir -p dist/Ikabot_XVF3800_preparation
+          cp -r config packages ha docs esphome .github dist/Ikabot_XVF3800_preparation/
+          cat > dist/Ikabot_XVF3800_preparation/README_PACKAGE.txt <<'EOF'
+          IKABOT XVF3800 + RESPEAKER LITE
+          =================================
+
+          Branche source : ikabot-integration
+
+          Fichiers essentiels :
+          - config/ikabot-xvf3800.yaml
+          - packages/ikabot-voice-assistant.yaml
+          - packages/ikabot-lite-audio-node.yaml
+          - ha/ikabot_audio_bridge.yaml
+          - esphome/components/ikabot_proxy_media_player/
+          - docs/IKABOT_ARCHITECTURE.md
+
+          IMPORTANT :
+          - Ne contient aucun secret Wi-Fi/API/OTA réel.
+          - Ne pas flasher sans adapter secrets.yaml.
+          - La PR reste volontairement en brouillon jusqu'aux essais matériels.
+          - Les configurations XVF3800 et Lite ont été validées/compilées sous ESPHome 2026.9.0 via GitHub Actions.
+          EOF
+          cd dist
+          zip -qr Ikabot_XVF3800_preparation.zip Ikabot_XVF3800_preparation
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ikabot_XVF3800_preparation
+          path: dist/Ikabot_XVF3800_preparation.zip
+          retention-days: 30

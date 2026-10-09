@@ -1,0 +1,132 @@
+# Ikabot Lite - base audio uniquement (active via config/ikabot-lite-final.yaml)
+# Conserve l'identite du lecteur et la sortie I2S/DAC; aucune entree micro.
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  cpu_frequency: 240MHz
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: 'y'
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: 'y'
+      CONFIG_SPIRAM_RODATA: 'y'
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: 'y'
+psram:
+  mode: octal
+  speed: 80MHz
+i2c:
+  - id: internal_i2c
+    sda: GPIO5
+    scl: GPIO6
+    frequency: 400kHz
+i2s_audio:
+  - id: i2s_output
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO8
+    i2s_mclk_pin: GPIO9
+external_components:
+  - source:
+      type: git
+      url: https://github.com/formatBCE/esphome
+      ref: respeaker_microphone
+    components: [i2s_audio]
+    refresh: 0s
+  - source:
+      type: git
+      url: https://github.com/formatBCE/Respeaker-Lite-ESPHome-integration
+      ref: main
+    components: [respeaker_lite]
+    refresh: 0s
+audio_dac:
+  - platform: aic3204
+    id: aic3204_dac
+    i2c_id: internal_i2c
+respeaker_lite:
+  id: respeaker
+  reset_pin: GPIO2
+  firmware_version:
+    name: XMOS firmware version
+  firmware:
+    url: https://github.com/formatBCE/Respeaker-Lite-ESPHome-integration/raw/refs/heads/main/respeaker_lite_i2s_dfu_firmware_48k_v1.1.0.bin
+    version: "1.1.0"
+    md5: 9297155d1bf3eb21a9d4db52a89ea0c6
+switch:
+  - platform: template
+    id: speaker_mute_switch
+    internal: true
+    optimistic: true
+    turn_on_action:
+      - lambda: id(respeaker).mute_speaker();
+    turn_off_action:
+      - lambda: id(respeaker).unmute_speaker();
+speaker:
+  - platform: i2s_audio
+    id: i2s_audio_speaker
+    sample_rate: 48000
+    i2s_mode: secondary
+    i2s_dout_pin: GPIO43
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_output
+    dac_type: external
+    channel: stereo
+    timeout: never
+    buffer_duration: 100ms
+    audio_dac: aic3204_dac
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: i2s_audio_speaker
+    sample_rate: 48000
+    bits_per_sample: 16
+media_source:
+  - platform: audio_file
+    id: audio_file_announcement_source
+  - platform: audio_http
+    id: http_announcement_source
+    buffer_size: 250000
+media_player:
+  - platform: speaker_source
+    id: external_media_player
+    name: Media Player
+    announcement_pipeline:
+      format: FLAC
+      num_channels: 1
+      sample_rate: 48000
+      speaker: announcement_resampling_speaker
+      sources:
+        - audio_file_announcement_source
+        - http_announcement_source
+    volume_increment: 0.05
+    volume_min: 0.4
+    volume_max: 0.85
+logger:
+  level: INFO
+debug:
+  update_interval: 30s
+sensor:
+  - platform: uptime
+    name: Ikabot Lite Uptime
+    update_interval: 30s
+  - platform: wifi_signal
+    name: Ikabot Lite Signal WiFi
+    update_interval: 30s
+  - platform: debug
+    free:
+      name: Ikabot Lite Heap libre
+    min_free:
+      name: Ikabot Lite Heap minimum
+    block:
+      name: Ikabot Lite Plus gros bloc
+    psram:
+      name: Ikabot Lite PSRAM libre
+    loop_time:
+      name: Ikabot Lite Loop time
+text_sensor:
+  - platform: debug
+    reset_reason:
+      name: Ikabot Lite Raison redemarrage
+
+button:
+  - platform: restart
+    name: Redemarrer Ikabot Lite

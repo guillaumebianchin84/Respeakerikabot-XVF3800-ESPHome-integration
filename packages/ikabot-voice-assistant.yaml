@@ -1,0 +1,931 @@
+# =============================================================================
+# IKABOT XVF3800 — voice assistant package (external audio on ReSpeaker Lite)
+#
+# Wake word detection, the Home Assistant voice pipeline, the media player
+# chain, and the notification sounds.
+#
+# The sound URLs are substitutions. Override any of them to use your own files.
+# =============================================================================
+
+substitutions:
+  # Substitutions for audio files
+  mute_switch_on_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_on.flac
+  mute_switch_off_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_off.flac
+  timer_finished_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/timer_finished.flac
+  wake_word_triggered_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  center_button_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_press.flac
+  center_button_double_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_double_press.flac
+  center_button_triple_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_triple_press.flac
+  center_button_long_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_long_press.flac
+  factory_reset_initiated_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_initiated.mp3
+  factory_reset_cancelled_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_cancelled.mp3
+  factory_reset_confirmed_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_confirmed.mp3
+  error_cloud_expired_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
+
+# ---------------------------------------------------------------------------
+# Ikabot two-node coordination
+# ---------------------------------------------------------------------------
+globals:
+  - id: ikabot_pending_wake_word
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+  - id: ikabot_session_token
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+  - id: ikabot_waiting_activation
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ikabot_tts_dispatched
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ikabot_suppress_tts
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Streaming TTS can expose its URL before the full response text reaches
+  # on_tts_start. Do not send audio to the Lite until we know the response is
+  # not the silent OK_ACTION sentinel.
+  - id: ikabot_tts_decision_known
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ikabot_pending_tts_uri
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+api:
+  actions:
+    - action: ikabot_activation_finished
+      variables:
+        token: string
+      then:
+        - if:
+            condition:
+              lambda: return id(ikabot_waiting_activation) && token == id(ikabot_session_token);
+            then:
+              - script.stop: ikabot_activation_watchdog
+              - lambda: id(ikabot_waiting_activation) = false;
+              - voice_assistant.start:
+                  wake_word: !lambda return id(ikabot_pending_wake_word);
+
+    - action: ikabot_activation_failed
+      variables:
+        token: string
+      then:
+        - if:
+            condition:
+              lambda: return id(ikabot_waiting_activation) && token == id(ikabot_session_token);
+            then:
+              - logger.log:
+                  level: WARN
+                  format: "IKABOT: activation sound failed, starting listening anyway"
+              - script.stop: ikabot_activation_watchdog
+              - lambda: id(ikabot_waiting_activation) = false;
+              - voice_assistant.start:
+                  wake_word: !lambda return id(ikabot_pending_wake_word);
+
+    - action: ikabot_external_tts_started
+      variables:
+        token: string
+      then:
+        - if:
+            condition:
+              lambda: return token == id(ikabot_session_token);
+            then:
+              - lambda: id(ikabot_proxy_player).external_started();
+
+    - action: ikabot_external_tts_finished
+      variables:
+        token: string
+      then:
+        - if:
+            condition:
+              lambda: return token == id(ikabot_session_token);
+            then:
+              - lambda: id(ikabot_proxy_player).external_finished();
+
+    - action: ikabot_external_tts_failed
+      variables:
+        token: string
+      then:
+        - if:
+            condition:
+              lambda: return token == id(ikabot_session_token);
+            then:
+              - logger.log:
+                  level: WARN
+                  format: "IKABOT: external TTS failed -> safe reset"
+              - lambda: id(ikabot_proxy_player).external_failed();
+              - homeassistant.event:
+                  event: esphome.ikabot_xvf_stop_audio
+                  data:
+                    token: !lambda return id(ikabot_session_token);
+              - homeassistant.action:
+                  action: script.ikabot_restaure_volume_freebox
+              - voice_assistant.stop:
+
+# Home Assistant keeps the authoritative "volume temporarily lowered" flag.
+# It survives an XVF reboot/disconnection, allowing recovery on reconnect.
+binary_sensor:
+  - platform: homeassistant
+    id: ikabot_volume_temporairement_baisse
+    entity_id: input_boolean.ikabot_volume_temporairement_baisse
+    internal: true
+
+switch:
+  # Mute Sound Switch.
+  - platform: template
+    id: mute_sound
+    name: Mute-unmute sound
+    icon: "mdi:bullhorn"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  # Wake Word Sound Switch.
+  - platform: template
+    id: wake_sound
+    name: Wake sound
+    icon: "mdi:bullhorn"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  # Beam Lock. When on, the XVF3800 beam is pinned to the wake-word direction
+  # for the duration of command capture (released on STT VAD end). Off by default
+  # because fixed-beam mode is a behavioural change worth opting into deliberately.
+  - platform: template
+    id: beam_lock_enabled
+    name: Beam lock
+    icon: "mdi:target-account"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+select:
+  - platform: template
+    name: "Wake word sensitivity"
+    id: wake_word_sensitivity
+    optimistic: true
+    initial_option: Slightly sensitive
+    restore_value: true
+    entity_category: config
+    options:
+      - Slightly sensitive
+      - Moderately sensitive
+      - Very sensitive
+    on_value:
+      # Sets specific wake word probabilities computed for each particular model
+      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
+      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
+      lambda: |-
+        if (x == "Slightly sensitive") {
+          id(okay_nabu).set_probability_cutoff(217);    // 0.85 -> 0.000 FAPH on DipCo (Manifest's default)
+          id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
+          id(hey_mycroft).set_probability_cutoff(253);  // 0.99 -> 0.567 FAPH on DipCo
+        } else if (x == "Moderately sensitive") {
+          id(okay_nabu).set_probability_cutoff(176);    // 0.69 -> 0.376 FAPH on DipCo
+          id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
+          id(hey_mycroft).set_probability_cutoff(242);  // 0.95 -> 1.502 FAPH on DipCo (Manifest's default)
+        } else if (x == "Very sensitive") {
+          id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
+          id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
+          id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
+        }
+
+audio_file:
+  - id: mute_switch_on_sound
+    file: ${mute_switch_on_sound_file}
+  - id: mute_switch_off_sound
+    file: ${mute_switch_off_sound_file}
+  - id: timer_finished_sound
+    file: ${timer_finished_sound_file}
+  - id: wake_word_triggered_sound
+    file: ${wake_word_triggered_sound_file}
+  - id: error_cloud_expired
+    file: ${error_cloud_expired_sound_file}
+
+media_source:
+  - platform: audio_file
+    id: audio_file_announcement_source
+  - platform: audio_http
+    id: http_announcement_source
+    buffer_size: 250000
+  - platform: audio_http
+    id: http_media_source
+    buffer_size: 500000
+  - platform: sendspin
+    id: sendspin_media_source
+    codecs: [FLAC, PCM]  # Prefer FLAC for Sendspin
+    fixed_delay: 480 microseconds  # The AIC3204 DAC used, as configured, on the VPE delays audio by 480 microseconds
+
+media_player:
+  # Logical player used only by Voice Assistant. It never decodes audio.
+  # Its ANNOUNCING/IDLE state mirrors the real playback on the ReSpeaker Lite.
+  - platform: ikabot_proxy_media_player
+    id: ikabot_proxy_player
+    name: "Ikabot External Audio Proxy"
+    internal: true
+
+  - platform: sendspin
+    id: sendspin_group_media_player
+  - platform: speaker_source
+    id: external_media_player
+    name: Media Player
+    announcement_pipeline:
+      format: FLAC     # FLAC is the least processor intensive codec
+      num_channels: 1  # Stereo audio is unnecessary for announcements
+      sample_rate: 48000
+      speaker: announcement_resampling_speaker
+      sources:
+        - audio_file_announcement_source
+        - http_announcement_source
+    media_pipeline:
+      format: FLAC     # FLAC is the least processor intensive codec
+      num_channels: 2
+      sample_rate: 48000
+      speaker: media_resampling_speaker
+      sources:
+        - http_media_source
+        - sendspin_media_source
+    volume_increment: 0.05
+    volume_min: 0.0
+    volume_max: 1.0
+    on_mute:
+      - delay: 100ms  # Debounce
+      - script.execute: control_leds_volume_changed
+    on_unmute:
+      - delay: 100ms  # Debounce
+      - script.execute: control_leds_volume_changed
+    on_volume:
+      if:
+        condition:
+          - lambda: return !id(init_in_progress);
+        then:
+          - delay: 100ms  # Debounce
+          - script.execute: control_leds_volume_changed
+    on_announcement:
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
+          decibel_reduction: 20
+          duration: 0.0s
+    on_state:
+      if:
+        condition:
+          and:
+            - switch.is_off: timer_ringing
+            - not:
+                voice_assistant.is_running:
+            - not:
+                media_player.is_announcing: external_media_player
+        then:
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 0
+              duration: 1.0s
+
+micro_wake_word:
+  id: mww
+  microphone:
+    microphone: i2s_mics
+    channels: 1
+    # gain_factor: 4
+  stop_after_detection: false
+  models:
+    - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/okay_nabu_20241226.3/okay_nabu.json
+      # probability_cutoff: 0.8
+      id: okay_nabu
+    - model: https://raw.githubusercontent.com/formatBCE/Respeaker-Lite-ESPHome-integration/refs/heads/main/microwakeword/models/v2/kenobi.json
+      id: kenobi
+    - model: hey_jarvis
+      id: hey_jarvis
+    - model: hey_mycroft
+      id: hey_mycroft
+    - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/stop/stop.json
+      id: stop
+      internal: true
+  vad:
+    probability_cutoff: 0.05
+  on_wake_word_detected:
+    # "Stop" is a hard reset command. It must remain effective even while the
+    # Lite is playing activation/waiting/TTS audio, so test it BEFORE the
+    # self-voice guards used for the other wake words.
+    - if:
+        condition:
+          lambda: |-
+            return wake_word == "Stop" ||
+                   wake_word == "stop" ||
+                   wake_word == "STOP";
+        then:
+          - script.execute: ikabot_stop_everything
+        else:
+          - if:
+              condition:
+                switch.is_off: mic_mute_switch
+              then:
+                # Ignore normal wake words while external TTS is active.
+                - if:
+                    condition:
+                      media_player.is_announcing:
+                        id: ikabot_proxy_player
+                    then:
+                      - logger.log:
+                          level: DEBUG
+                          format: "IKABOT: wake ignored during external TTS"
+                    else:
+                      - if:
+                          condition:
+                            lambda: return id(ikabot_waiting_activation);
+                          then:
+                            - logger.log:
+                                level: DEBUG
+                                format: "IKABOT: wake ignored while activation sound is pending"
+                          else:
+                            - if:
+                                condition:
+                                  switch.is_on: timer_ringing
+                                then:
+                                  - switch.turn_off: timer_ringing
+                                else:
+                                  - if:
+                                      condition:
+                                        voice_assistant.is_running:
+                                      then:
+                                        - voice_assistant.stop:
+                                      else:
+                                        - homeassistant.action:
+                                            action: script.ikabot_baisse_volume_freebox
+
+                                        - script.execute:
+                                            id: ikabot_diag_wake
+                                            wake_word: !lambda return wake_word;
+
+                                        - lambda: |-
+                                            id(ikabot_pending_wake_word) = wake_word;
+                                            id(ikabot_session_token) = std::to_string(millis());
+                                            id(ikabot_waiting_activation) = true;
+                                            id(ikabot_tts_dispatched) = false;
+                                            id(ikabot_suppress_tts) = false;
+
+                                        - if:
+                                            condition:
+                                              switch.is_on: beam_lock_enabled
+                                            then:
+                                              - lambda: id(respeaker).lock_beam();
+
+                                        - homeassistant.event:
+                                            event: esphome.ikabot_xvf_activation_requested
+                                            data:
+                                              wake_word: !lambda return wake_word;
+                                              token: !lambda return id(ikabot_session_token);
+
+                                        - script.execute: ikabot_activation_watchdog
+              else:
+                - logger.log:
+                    level: INFO
+                    format: "IKABOT: wake ignored, microphone muted"
+
+voice_assistant:
+  id: va
+  microphone:
+    microphone: i2s_mics
+    channels: 0
+  media_player: ikabot_proxy_player
+  micro_wake_word: mww
+  use_wake_word: false
+  noise_suppression_level: 0
+  auto_gain: 0 dbfs
+  volume_multiplier: 1
+  on_client_connected:
+    - if:
+        condition:
+          - lambda: return id(init_in_progress);
+          - switch.is_on: mic_mute_switch
+        then:
+          - switch.turn_off: mic_mute_switch
+    - lambda: id(init_in_progress) = false;
+
+    # Crash/reboot/disconnection recovery: if Home Assistant says a previous
+    # Ikabot turn left the house volume lowered, restore it before going ready.
+    - wait_until:
+        condition:
+          lambda: return id(ikabot_volume_temporairement_baisse).has_state();
+        timeout: 5s
+    - if:
+        condition:
+          lambda: |-
+            return id(ikabot_volume_temporairement_baisse).has_state() &&
+                   id(ikabot_volume_temporairement_baisse).state;
+        then:
+          - logger.log:
+              level: WARN
+              format: "IKABOT: reconnect with volume still lowered -> restoring"
+          - homeassistant.action:
+              action: script.ikabot_restaure_volume_freebox
+
+    - micro_wake_word.start:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
+  on_client_disconnected:
+    - logger.log:
+        level: WARN
+        format: "IKABOT: Home Assistant disconnected -> abort; volume recovery will run on reconnect"
+    - voice_assistant.stop:
+    - lambda: |-
+        id(respeaker).unlock_beam();
+        id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
+    - script.execute: control_leds
+  on_error:
+    - script.execute:
+        id: ikabot_diag_error
+        message: !lambda 'return message;'
+
+    # Whatever the pipeline error is, never leave the Freebox/Google volume ducked.
+    - homeassistant.action:
+        action: script.ikabot_restaure_volume_freebox
+
+    # Only set the error phase if the error code is different than duplicate_wake_up_detected or stt-no-text-recognized
+    # These two are ignored for a better user experience
+    - if:
+        condition:
+          and:
+            - lambda: return !id(init_in_progress);
+            - lambda: return code != "duplicate_wake_up_detected";
+            - lambda: return code != "stt-no-text-recognized";
+        then:
+          - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
+          - script.execute: control_leds
+    # If the error code is cloud-auth-failed, serve a local audio file guiding the user.
+    - if:
+        condition:
+          - lambda: return code == "cloud-auth-failed";
+        then:
+          - script.execute:
+              id: play_sound
+              priority: true
+              sound_file: "error_cloud_expired"
+  # A new VA turn starts only after the Lite confirmed the activation phrase.
+  on_start:
+    - script.execute: ikabot_diag_pipeline_start
+    - lambda: |-
+        // New token for each VA turn. This prevents a delayed ACK from the
+        // previous turn from finishing the next TTS during continue_conversation.
+        id(ikabot_session_token) =
+          std::to_string(millis()) + "-" + std::to_string(random_uint32());
+        id(ikabot_tts_dispatched) = false;
+        id(ikabot_suppress_tts) = false;
+        id(ikabot_tts_decision_known) = false;
+        id(ikabot_pending_tts_uri).clear();
+  on_listening:
+    - script.execute: ikabot_diag_listening
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
+  on_stt_vad_start:
+    - script.execute: ikabot_diag_vad_start
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
+  on_stt_vad_end:
+    - script.execute: ikabot_diag_vad_end
+    - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
+    - lambda: id(respeaker).unlock_beam();
+    - script.execute: control_leds
+
+    # Ask the ReSpeaker Lite to play one local waiting phrase while HA thinks.
+    - homeassistant.event:
+        event: esphome.ikabot_xvf_waiting_requested
+        data:
+          token: !lambda return id(ikabot_session_token);
+  on_intent_start:
+    - script.execute: ikabot_diag_intent_start
+
+  on_intent_end:
+    - script.execute: ikabot_diag_intent_end
+
+  on_intent_progress:
+    - if:
+        condition:
+          lambda: 'return !x.empty();'
+        then:
+          - lambda: |-
+              id(ikabot_pending_tts_uri) = x;
+              id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+          - script.execute: control_leds
+          - if:
+              condition:
+                lambda: return id(ikabot_tts_decision_known) && !id(ikabot_suppress_tts);
+              then:
+                - script.execute:
+                    id: ikabot_dispatch_tts
+                    uri: !lambda return id(ikabot_pending_tts_uri);
+
+  on_tts_start:
+    - script.execute:
+        id: ikabot_diag_tts_start
+        text: !lambda 'return x;'
+
+    - lambda: |-
+        std::string response = x;
+        const auto first = response.find_first_not_of(" \\t\\r\\n");
+        const auto last = response.find_last_not_of(" \\t\\r\\n");
+        if (first == std::string::npos) {
+          response = "";
+        } else {
+          response = response.substr(first, last - first + 1);
+        }
+        id(ikabot_suppress_tts) =
+          id(ikabot_suppress_tts) || (response == "OK_ACTION");
+        id(ikabot_tts_decision_known) = true;
+
+    - if:
+        condition:
+          lambda: return id(ikabot_suppress_tts);
+        then:
+          - logger.log:
+              level: INFO
+              format: "IKABOT: OK_ACTION -> no TTS"
+          # Stop the VA FIRST: in STREAMING_RESPONSE, request_stop()
+          # must see an announcing proxy to issue its normal STOP transition.
+          # Cancel the proxy immediately afterwards so no Lite TTS ACK is needed.
+          - voice_assistant.stop:
+          - lambda: |-
+              id(ikabot_proxy_player).cancel_pending();
+              id(ikabot_pending_tts_uri).clear();
+              id(ikabot_tts_dispatched) = false;
+              id(ikabot_waiting_activation) = false;
+          - script.stop: ikabot_activation_watchdog
+          - script.stop: ikabot_dispatch_tts
+          - homeassistant.event:
+              event: esphome.ikabot_xvf_stop_audio
+              data:
+                token: !lambda return id(ikabot_session_token);
+          - homeassistant.action:
+              action: script.ikabot_restaure_volume_freebox
+          - script.execute:
+              id: ikabot_ok_action_recovery
+              token: !lambda return id(ikabot_session_token);
+        else:
+          - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+          - script.execute: control_leds
+          - if:
+              condition:
+                lambda: return !id(ikabot_pending_tts_uri).empty();
+              then:
+                - script.execute:
+                    id: ikabot_dispatch_tts
+                    uri: !lambda return id(ikabot_pending_tts_uri);
+
+  on_tts_end:
+    - script.execute: ikabot_diag_tts_end
+    - lambda: |-
+        if (!x.empty())
+          id(ikabot_pending_tts_uri) = x;
+
+    # TTS_START normally arrives first. If a backend ever skips it, fail open
+    # here rather than losing the spoken response.
+    - if:
+        condition:
+          lambda: return !id(ikabot_tts_decision_known);
+        then:
+          - lambda: id(ikabot_tts_decision_known) = true;
+
+    - if:
+        condition:
+          lambda: return !id(ikabot_suppress_tts) && !id(ikabot_pending_tts_uri).empty();
+        then:
+          - script.execute:
+              id: ikabot_dispatch_tts
+              uri: !lambda return id(ikabot_pending_tts_uri);
+
+  on_stt_end:
+    - script.execute:
+        id: ikabot_diag_stt_end
+        text: !lambda 'return x;'
+
+    - script.execute:
+        id: send_stt_text_event
+        stt_text: !lambda 'return x;'
+
+    - lambda: |-
+        std::string text = x;
+        const auto first = text.find_first_not_of(" \\t\\r\\n");
+        const auto last = text.find_last_not_of(" \\t\\r\\n");
+        if (first == std::string::npos) {
+          text = "";
+        } else {
+          text = text.substr(first, last - first + 1);
+        }
+        if (text == "INCOMPRÉHENSIBLE" || text == "INCOMPREHENSIBLE" ||
+            text == "INCOMPRÉHENSIBLE." || text == "INCOMPREHENSIBLE.") {
+          id(ikabot_suppress_tts) = true;
+        }
+
+    - if:
+        condition:
+          lambda: return id(ikabot_suppress_tts);
+        then:
+          - logger.log:
+              level: INFO
+              format: "IKABOT: incomprehensible -> stop silently"
+          - homeassistant.event:
+              event: esphome.ikabot_xvf_stop_audio
+              data:
+                token: !lambda return id(ikabot_session_token);
+          - homeassistant.action:
+              action: script.ikabot_restaure_volume_freebox
+          - voice_assistant.stop:
+
+  # When the voice assistant ends ...
+  on_end:
+    # Safety-net unlock: covers paths where on_stt_vad_end never fired
+    # (pipeline error mid-capture, abort, etc.). Idempotent.
+    - lambda: id(respeaker).unlock_beam();
+    - wait_until:
+        condition:
+          not:
+            voice_assistant.is_running:
+        timeout: 3s
+    # If the end happened because of an error, let the error phase on for a second
+    - if:
+        condition:
+          lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+        then:
+          - delay: 1s
+    # Reset the voice assistant phase id and reset the LED animations.
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
+    - homeassistant.action:
+        action: script.ikabot_restaure_volume_freebox
+    - script.execute: ikabot_diag_idle
+  on_timer_finished:
+    - switch.turn_on: timer_ringing
+    - lambda: |
+        id(next_timer).publish_state(-1);
+        id(next_timer_name).publish_state("-");
+  on_timer_started:
+    - lambda: |
+        id(check_if_timers_active).execute();
+        if (id(is_timer_active)) {
+          id(fetch_first_active_timer).execute();
+          id(next_timer).publish_state(id(first_active_timer).seconds_left);
+          id(next_timer_name).publish_state(id(first_active_timer).name);
+        }
+    - script.execute: control_leds
+  on_timer_cancelled:
+    - lambda: |
+        id(check_if_timers_active).execute();
+        if (id(is_timer_active)) {
+          id(fetch_first_active_timer).execute();
+          id(next_timer).publish_state(id(first_active_timer).seconds_left);
+          id(next_timer_name).publish_state(id(first_active_timer).name);
+        } else {
+          id(next_timer).publish_state(-1);
+          id(next_timer_name).publish_state("-");
+        }
+    - script.execute: control_leds
+  on_timer_updated:
+    - lambda: |
+        id(check_if_timers_active).execute();
+        if (id(is_timer_active)) {
+          id(fetch_first_active_timer).execute();
+          id(next_timer).publish_state(id(first_active_timer).seconds_left);
+          id(next_timer_name).publish_state(id(first_active_timer).name);
+        }
+    - script.execute: control_leds
+  on_timer_tick:
+    # Reduce LED updates - only every 5 seconds instead of every second
+    - lambda: |
+        id(fetch_first_active_timer).execute();
+        int seconds_left = id(first_active_timer).seconds_left;
+        if (seconds_left % 5 == 0) {
+          id(next_timer).publish_state(seconds_left);
+        }
+        if (id(current_led_effect) == "timer_tick") {
+          id(control_leds_timer_ticking).execute();
+        }
+
+interval:
+  # micro_wake_word stops for good after an inference or allocation error, and
+  # only on_client_connected starts it. Restart it so the device is not left deaf.
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            and:
+              - voice_assistant.connected:
+              - lambda: return !id(init_in_progress);
+              - not:
+                  micro_wake_word.is_running:
+          then:
+            - logger.log:
+                level: WARN
+                format: "Wake word detection stopped, restarting it"
+            - micro_wake_word.start:
+
+script:
+  # Global hard-stop requested by the dedicated "Stop" wake word.
+  # Leaves both ESPHome nodes and the house audio in a known ready state.
+  - id: ikabot_stop_everything
+    mode: restart
+    then:
+      - logger.log:
+          level: WARN
+          format: "IKABOT: STOP -> abort everything and return to ready"
+
+      - script.stop: ikabot_activation_watchdog
+      - script.stop: ikabot_dispatch_tts
+
+      # Stop any timer/alarm state owned by the XVF.
+      - switch.turn_off: timer_ringing
+
+      # Stop the real audio node through Home Assistant.
+      - homeassistant.event:
+          event: esphome.ikabot_xvf_stop_audio
+          data:
+            token: !lambda return id(ikabot_session_token);
+
+      # Reset the logical proxy immediately. Do not wait for an ACK from the
+      # Lite: STOP must always leave the XVF ready, even if HA/Lite is delayed.
+      - lambda: |-
+          id(ikabot_proxy_player).external_failed();
+          id(ikabot_waiting_activation) = false;
+          id(ikabot_tts_dispatched) = false;
+          id(ikabot_suppress_tts) = false;
+          id(ikabot_tts_decision_known) = false;
+          id(ikabot_pending_tts_uri).clear();
+          id(ikabot_pending_wake_word).clear();
+          id(respeaker).unlock_beam();
+          id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+
+      - voice_assistant.stop:
+
+      # Also stop any local XVF announcement path that may still be active
+      # (timer/button sounds from the upstream package).
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+
+      - script.execute: control_leds
+
+      # Restore the Freebox/Google volume even when STOP happened before the
+      # Voice Assistant had actually started.
+      - homeassistant.action:
+          action: script.ikabot_restaure_volume_freebox
+
+      - script.execute: ikabot_diag_idle
+
+  # A silent action has no real audio completion from the Lite. Verify that
+  # the VA has returned to idle; do not let the normal 80s TTS watchdog decide.
+  # Token/flag guards prevent an old recovery from affecting a newer turn.
+  - id: ikabot_ok_action_recovery
+    mode: restart
+    parameters:
+      token: string
+    then:
+      - delay: 3s
+      - if:
+          condition:
+            lambda: return token == id(ikabot_session_token) && id(ikabot_suppress_tts);
+          then:
+            - if:
+                condition:
+                  voice_assistant.is_running:
+                then:
+                  - logger.log:
+                      level: WARN
+                      format: "IKABOT: OK_ACTION VA still running after 3s -> retry stop"
+                  - voice_assistant.stop:
+                  - lambda: id(ikabot_proxy_player).cancel_pending();
+            - lambda: |-
+                id(ikabot_waiting_activation) = false;
+                id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+            - script.execute: control_leds
+            - script.execute: ikabot_diag_idle
+            - if:
+                condition:
+                  not:
+                    micro_wake_word.is_running:
+                then:
+                  - micro_wake_word.start:
+
+  - id: ikabot_activation_watchdog
+    mode: restart
+    then:
+      - delay: 8s
+      - if:
+          condition:
+            lambda: return id(ikabot_waiting_activation);
+          then:
+            - logger.log:
+                level: WARN
+                format: "IKABOT: activation ACK timeout -> listening fallback"
+            - lambda: id(ikabot_waiting_activation) = false;
+            - voice_assistant.start:
+                wake_word: !lambda return id(ikabot_pending_wake_word);
+
+  - id: ikabot_dispatch_tts
+    mode: queued
+    parameters:
+      uri: string
+    then:
+      - if:
+          condition:
+            lambda: return !id(ikabot_tts_dispatched) && !id(ikabot_suppress_tts) && !uri.empty();
+          then:
+            - lambda: id(ikabot_tts_dispatched) = true;
+            - homeassistant.event:
+                event: esphome.ikabot_xvf_tts_uri
+                data:
+                  uri: !lambda return uri;
+                  token: !lambda return id(ikabot_session_token);
+
+  # Stock local sound helper remains for mute/timer/button functions only.
+  # Voice Assistant replies never use the local XVF speaker path.
+  # Script executed when we want to play sounds on the device.
+  - id: play_sound
+    parameters:
+      priority: bool
+      # sound_file: "audio::AudioFile*"
+      sound_file: string
+    then:
+      - if:
+          condition:
+            lambda: return priority;
+          then:
+            - media_player.stop:
+                id: external_media_player
+                announcement: true
+      - lambda: |-
+          if ( (id(external_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
+            id(external_media_player)
+              ->make_call()
+              .set_media_url("audio-file://" + sound_file)
+              .set_announcement(true)
+              .perform();
+          }
+
+  # Script used activate the stop word if the TTS step is long.
+  # Why is this wrapped on a script?
+  #   Becasue we want to stop the sequence if the TTS step is faster than that.
+  #   This allows us to prevent having the deactivation of the stop word before its own activation.
+  - id: activate_stop_word_once
+    then:
+      - wait_until:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+      - delay: 1s
+      # Enable stop wake word
+      - if:
+          condition:
+            switch.is_off: timer_ringing
+          then:
+            - micro_wake_word.enable_model: stop
+            - wait_until:
+                not:
+                  media_player.is_announcing:
+                    id: external_media_player
+            - if:
+                condition:
+                  switch.is_off: timer_ringing
+                then:
+                  - micro_wake_word.disable_model: stop
+
+
+  - id: send_wake_word_event
+    parameters:
+      wake_word: string
+    then:
+      - homeassistant.event:
+          event: esphome.wake_word_detected
+          data:
+            wake_word: !lambda return wake_word;
+  - id: send_alarm_event
+    then:
+      - homeassistant.event:
+          event: esphome.alarm_ringing
+  - id: send_tts_uri_event
+    parameters:
+      tts_uri: string
+    then:
+      - homeassistant.event:
+          event: esphome.tts_uri
+          data:
+            uri: !lambda return tts_uri;
+  - id: send_stt_text_event
+    parameters:
+      stt_text: string
+    then:
+      - homeassistant.event:
+          event: esphome.stt_text
+          data:
+            text: !lambda return stt_text;
