@@ -4,14 +4,19 @@ substitutions:
 # ReSpeaker Lite = sortie audio uniquement.
 # Le XVF3800 est le seul noeud qui ecoute les wake words et execute le pipeline vocal.
 packages:
-  respeaker-satellite: !include packages/ikabot/respeaker-satellite-base.yaml
+  ikabot-lite-base:
+    url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
+    ref: ikabot-integration
+    refresh: 0s
+    files:
+      - packages/ikabot-lite-audio-base-draft.yaml
 
   ikabot-audio-node:
     url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
     ref: ikabot-integration
     refresh: 0s
     files:
-      - packages/ikabot-lite-audio-node.yaml
+      - packages/ikabot-lite-audio-node-only.yaml
 
 esphome:
   name: ikabot
