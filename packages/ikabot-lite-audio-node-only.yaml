@@ -200,28 +200,32 @@ script:
       # Audio-only node must never stay hardware-muted.
       - switch.turn_off: speaker_mute_switch
 
-      # Interrupt the waiting phrase immediately when the real answer arrives.
-      - media_player.stop:
-          id: external_media_player
-          announcement: true
-
+      # PLAY_URI already replaces the previous announcement and waits for the
+      # previous media source to stop. Sending an explicit STOP immediately
+      # before PLAY_URI races with the queued playback commands, especially
+      # when the local waiting MP3 is still finishing.
       - lambda: |-
+          ESP_LOGI("ikabot.audio", "TTS URL received (token=%s)", token.c_str());
           id(external_media_player)
             ->make_call()
             .set_media_url(uri)
             .set_announcement(true)
             .perform();
 
+      # The generic player may still be ANNOUNCING the previous waiting MP3.
+      # Only the HTTP media source can prove that the new TTS has started.
       - wait_until:
           condition:
-            media_player.is_announcing:
-              id: external_media_player
-          timeout: 5s
+            lambda: |-
+              return id(http_announcement_source).get_state() ==
+                media_source::MediaSourceState::PLAYING;
+          timeout: 8s
 
       - if:
           condition:
-            media_player.is_announcing:
-              id: external_media_player
+            lambda: |-
+              return id(http_announcement_source).get_state() ==
+                media_source::MediaSourceState::PLAYING;
           then:
             - script.execute:
                 id: ikabot_audio_publish_started
