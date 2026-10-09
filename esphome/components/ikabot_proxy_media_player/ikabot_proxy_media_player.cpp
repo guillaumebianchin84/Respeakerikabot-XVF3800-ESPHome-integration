@@ -95,6 +95,15 @@ void IkabotProxyMediaPlayer::external_finished() {
   ESP_LOGD(TAG, "External playback confirmed finished");
 }
 
+void IkabotProxyMediaPlayer::cancel_pending() {
+  // A silent OK_ACTION must not leave the VA waiting for an audio FINISH ACK.
+  this->cancel_timeout("external-playback-watchdog");
+  this->awaiting_external_finish_ = false;
+  this->pending_url_.clear();
+  this->set_state_(media_player::MEDIA_PLAYER_STATE_IDLE);
+  ESP_LOGI(TAG, "Silent response: external playback cancelled");
+}
+
 void IkabotProxyMediaPlayer::external_failed() {
   this->cancel_timeout("external-playback-watchdog");
   this->awaiting_external_finish_ = false;
