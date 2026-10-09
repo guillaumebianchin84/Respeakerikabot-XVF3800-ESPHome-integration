@@ -553,6 +553,12 @@ voice_assistant:
           - logger.log:
               level: INFO
               format: "IKABOT: OK_ACTION -> no TTS"
+          # Explicitly release any stale proxy announcement before stopping
+          # the VA. A silent action must not wait for a Lite TTS FINISH ACK.
+          - lambda: |-
+              id(ikabot_proxy_player).cancel_pending();
+              id(ikabot_pending_tts_uri).clear();
+              id(ikabot_tts_dispatched) = false;
           - homeassistant.event:
               event: esphome.ikabot_xvf_stop_audio
               data:
