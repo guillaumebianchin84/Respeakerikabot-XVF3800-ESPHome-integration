@@ -626,8 +626,8 @@ voice_assistant:
         condition:
           lambda: |-
             std::string recognized = x;
-            const auto first = recognized.find_first_not_of(" \\t\\r\\n");
-            const auto last = recognized.find_last_not_of(" \\t\\r\\n.!?");
+            const auto first = recognized.find_first_not_of(" \t\r\n");
+            const auto last = recognized.find_last_not_of(" \t\r\n.!?");
             if (first == std::string::npos || last == std::string::npos || last < first)
               return false;
             recognized = recognized.substr(first, last - first + 1);
