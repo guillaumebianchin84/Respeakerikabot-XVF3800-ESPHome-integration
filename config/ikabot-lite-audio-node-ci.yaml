@@ -3,7 +3,9 @@
 # formatBCE ReSpeaker Lite package. No real credentials or local MP3 files.
 
 packages:
-  respeaker-satellite: github://formatBCE/Respeaker-Lite-ESPHome-integration/config/common/respeaker-satellite-base.yaml@main
+# Pin the 2026.9-compatible upstream base so CI does not silently switch
+  # to a newer ESPHome min_version when formatBCE updates main.
+  respeaker-satellite: github://formatBCE/Respeaker-Lite-ESPHome-integration/config/common/respeaker-satellite-base.yaml@4282ef33ebd87080ca922412d9dda55eadf32169
   ikabot-audio-node:
     url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
     ref: ikabot-integration
