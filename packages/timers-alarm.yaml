@@ -67,8 +67,7 @@ switch:
     internal: true
     restore_mode: ALWAYS_OFF
     on_turn_off:
-      # Disable stop wake word
-      - micro_wake_word.disable_model: stop
+      # STOP is a permanent priority wake word (managed by XVF voice package).
       - script.execute: disable_repeat
       # Stop any current announcement (ie: stop the timer ring mid playback)
       - if:
@@ -92,8 +91,7 @@ switch:
           id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
-      # Enable stop wake word
-      - micro_wake_word.enable_model: stop
+      # STOP is already enabled even outside the timer phase.
       # Ring timer
       - script.execute: ring_timer
       # Refresh LED

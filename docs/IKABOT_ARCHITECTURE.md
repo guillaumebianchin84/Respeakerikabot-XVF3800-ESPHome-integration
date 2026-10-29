@@ -79,6 +79,28 @@ XVF wake word
                XVF réécoute                     retour wake
 ```
 
+## STOP prioritaire (XVF -> HA -> Lite)
+
+- Le modèle local `stop` est **actif en permanence** sur le XVF, même
+  pendant l'écoute STT et la lecture TTS. La détection ne passe pas par Gemini.
+- `ikabot_stop_everything` interrompt l'assistant, annule la conversation
+  continue, coupe le son local et demande au Lite de couper activation, attente
+  ou TTS. Le volume Freebox est restauré.
+- Le Lite annule ses scripts audio et mémorise les identifiants de conversation
+  interrompus : les commandes audio retardées avec ces identifiants sont ignorées.
+- L'état du modèle Stop et celui de micro_wake_word sont contrôlés périodiquement
+  pour éviter de laisser Ikabot sourd après une erreur.
+- L'ordre `ikabot_stop_audio` attend maintenant un `token` depuis
+  `ha/ikabot_audio_bridge.yaml`. Mettre à jour le firmware du **Lite** et
+  les automatismes HA en même temps que le XVF.
+- Stop n'annule pas une minuterie future programmée ; il interrompt la
+  sonnerie et l'interaction en cours.
+
+Tests matériels à effectuer après les deux flashs : fausse activation en phase
+d'écoute, commande pendant le STT, son d'attente, réponse TTS, conversation
+continue, sonnerie de minuterie, puis réactivation normale par « OK Nabu ».
+Vérifier à chaque arrêt que le son Freebox revient et qu'aucun son ne repart.
+
 ## Cas spéciaux
 
 - **OK_ACTION** : l'URL de streaming est retenue jusqu'à lecture du texte TTS.

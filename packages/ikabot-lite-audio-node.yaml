@@ -11,6 +11,22 @@
 #   - audio_file ids attente_01..attente_20
 # =============================================================================
 
+# Remember the cancelled conversation tokens so late HA audio commands
+# cannot restart activation, waiting, or TTS after the user said STOP.
+globals:
+  - id: ikabot_audio_last_token
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: ikabot_audio_cancelled_token
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: ikabot_audio_cancelled_prior_token
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
 esphome:
   on_boot:
     priority: -100
@@ -60,30 +76,64 @@ api:
       variables:
         token: string
       then:
-        - script.execute:
-            id: ikabot_audio_play_activation
-            token: !lambda return token;
+        - if:
+            condition:
+              lambda: |-
+                return !token.empty() &&
+                       token != id(ikabot_audio_cancelled_token) &&
+                       token != id(ikabot_audio_cancelled_prior_token);
+            then:
+              - lambda: id(ikabot_audio_last_token) = token;
+              - script.execute:
+                  id: ikabot_audio_play_activation
+                  token: !lambda return token;
 
     - action: ikabot_play_waiting
       variables:
         token: string
       then:
-        - script.execute:
-            id: ikabot_audio_play_waiting
-            token: !lambda return token;
+        - if:
+            condition:
+              lambda: |-
+                return !token.empty() &&
+                       token != id(ikabot_audio_cancelled_token) &&
+                       token != id(ikabot_audio_cancelled_prior_token);
+            then:
+              - lambda: id(ikabot_audio_last_token) = token;
+              - script.execute:
+                  id: ikabot_audio_play_waiting
+                  token: !lambda return token;
 
     - action: ikabot_play_tts
       variables:
         uri: string
         token: string
       then:
-        - script.execute:
-            id: ikabot_audio_play_tts
-            uri: !lambda return uri;
-            token: !lambda return token;
+        - if:
+            condition:
+              lambda: |-
+                return !token.empty() &&
+                       token != id(ikabot_audio_cancelled_token) &&
+                       token != id(ikabot_audio_cancelled_prior_token);
+            then:
+              - lambda: id(ikabot_audio_last_token) = token;
+              - script.execute:
+                  id: ikabot_audio_play_tts
+                  uri: !lambda return uri;
+                  token: !lambda return token;
 
     - action: ikabot_stop_audio
+      variables:
+        token: string
       then:
+        # Block any delayed command from either the activation or current
+        # VA turn before stopping the scripts and physical audio.
+        - lambda: |-
+            id(ikabot_audio_cancelled_prior_token) = id(ikabot_audio_last_token);
+            id(ikabot_audio_cancelled_token) = token;
+        - script.stop: ikabot_audio_play_activation
+        - script.stop: ikabot_audio_play_waiting
+        - script.stop: ikabot_audio_play_tts
         - media_player.stop:
             id: external_media_player
             announcement: true

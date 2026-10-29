@@ -51,6 +51,12 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+  # A hard STOP blocks stale VA callbacks until a new normal wake word.
+  - id: ikabot_stop_latched
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
   # Streaming TTS can expose its URL before the full response text reaches
   # on_tts_start. Do not send audio to the Lite until we know the response is
   # not the silent OK_ACTION sentinel.
@@ -101,7 +107,7 @@ api:
       then:
         - if:
             condition:
-              lambda: return token == id(ikabot_session_token);
+              lambda: return !id(ikabot_stop_latched) && token == id(ikabot_session_token);
             then:
               - lambda: id(ikabot_proxy_player).external_started();
 
@@ -111,7 +117,7 @@ api:
       then:
         - if:
             condition:
-              lambda: return token == id(ikabot_session_token);
+              lambda: return !id(ikabot_stop_latched) && token == id(ikabot_session_token);
             then:
               - lambda: id(ikabot_proxy_player).external_finished();
 
@@ -121,7 +127,7 @@ api:
       then:
         - if:
             condition:
-              lambda: return token == id(ikabot_session_token);
+              lambda: return !id(ikabot_stop_latched) && token == id(ikabot_session_token);
             then:
               - logger.log:
                   level: WARN
@@ -313,7 +319,7 @@ micro_wake_word:
       id: hey_mycroft
     - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/stop/stop.json
       id: stop
-      internal: true
+      internal: true  # Not exposed to HA wake-word selection: always enabled locally.
   vad:
     probability_cutoff: 0.05
   on_wake_word_detected:
@@ -371,8 +377,10 @@ micro_wake_word:
                                             wake_word: !lambda return wake_word;
 
                                         - lambda: |-
+                                            id(ikabot_stop_latched) = false;
                                             id(ikabot_pending_wake_word) = wake_word;
-                                            id(ikabot_session_token) = std::to_string(millis());
+                                            id(ikabot_session_token) =
+                                              std::to_string(millis()) + "-" + std::to_string(random_uint32());
                                             id(ikabot_waiting_activation) = true;
                                             id(ikabot_tts_dispatched) = false;
                                             id(ikabot_suppress_tts) = false;
@@ -433,6 +441,7 @@ voice_assistant:
           - homeassistant.action:
               action: script.ikabot_restaure_volume_freebox
 
+    - micro_wake_word.enable_model: stop
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
@@ -501,10 +510,14 @@ voice_assistant:
     - script.execute: control_leds
 
     # Ask the ReSpeaker Lite to play one local waiting phrase while HA thinks.
-    - homeassistant.event:
-        event: esphome.ikabot_xvf_waiting_requested
-        data:
-          token: !lambda return id(ikabot_session_token);
+    - if:
+        condition:
+          lambda: return !id(ikabot_stop_latched);
+        then:
+          - homeassistant.event:
+              event: esphome.ikabot_xvf_waiting_requested
+              data:
+                token: !lambda return id(ikabot_session_token);
   on_intent_start:
     - script.execute: ikabot_diag_intent_start
 
@@ -514,7 +527,7 @@ voice_assistant:
   on_intent_progress:
     - if:
         condition:
-          lambda: 'return !x.empty();'
+          lambda: 'return !id(ikabot_stop_latched) && !x.empty();'
         then:
           - lambda: |-
               id(ikabot_pending_tts_uri) = x;
@@ -600,7 +613,7 @@ voice_assistant:
 
     - if:
         condition:
-          lambda: return !id(ikabot_suppress_tts) && !id(ikabot_pending_tts_uri).empty();
+          lambda: return !id(ikabot_stop_latched) && !id(ikabot_suppress_tts) && !id(ikabot_pending_tts_uri).empty();
         then:
           - script.execute:
               id: ikabot_dispatch_tts
@@ -716,7 +729,22 @@ voice_assistant:
 interval:
   # micro_wake_word stops for good after an inference or allocation error, and
   # only on_client_connected starts it. Restart it so the device is not left deaf.
-  - interval: 10s
+  # The STOP model is internal and must never be turned off by other
+  # announcements or timer actions. Re-enable it if a restored model state
+  # or another component unexpectedly disabled it.
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            not:
+              micro_wake_word.model_is_enabled: stop
+          then:
+            - logger.log:
+                level: WARN
+                format: "IKABOT: STOP model disabled -> re-enabling"
+            - micro_wake_word.enable_model: stop
+
+  - interval: 3s
     then:
       - if:
           condition:
@@ -729,6 +757,7 @@ interval:
             - logger.log:
                 level: WARN
                 format: "Wake word detection stopped, restarting it"
+            - micro_wake_word.enable_model: stop
             - micro_wake_word.start:
 
 script:
@@ -741,22 +770,29 @@ script:
           level: WARN
           format: "IKABOT: STOP -> abort everything and return to ready"
 
+      # Latch first: callbacks already in flight must not enqueue more TTS.
+      - lambda: id(ikabot_stop_latched) = true;
       - script.stop: ikabot_activation_watchdog
       - script.stop: ikabot_dispatch_tts
+      - script.stop: ikabot_ok_action_recovery
 
-      # Stop any timer/alarm state owned by the XVF.
+      # Cancel the local timer ring without cancelling future scheduled timers.
       - switch.turn_off: timer_ringing
 
-      # Stop the real audio node through Home Assistant.
+      # Tell HA/Lite to stop the real audio, including activation/waiting audio.
       - homeassistant.event:
           event: esphome.ikabot_xvf_stop_audio
           data:
             token: !lambda return id(ikabot_session_token);
 
-      # Reset the logical proxy immediately. Do not wait for an ACK from the
-      # Lite: STOP must always leave the XVF ready, even if HA/Lite is delayed.
+      # Request VA stop BEFORE clearing the announcing proxy. This also clears
+      # native continue_conversation, so no follow-up listening is scheduled.
+      - voice_assistant.stop:
       - lambda: |-
-          id(ikabot_proxy_player).external_failed();
+          id(ikabot_proxy_player).cancel_pending();
+          // Invalidate in-flight ACKs from this conversation.
+          id(ikabot_session_token) =
+            "stopped-" + std::to_string(millis()) + "-" + std::to_string(random_uint32());
           id(ikabot_waiting_activation) = false;
           id(ikabot_tts_dispatched) = false;
           id(ikabot_suppress_tts) = false;
@@ -766,22 +802,43 @@ script:
           id(respeaker).unlock_beam();
           id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
 
-      - voice_assistant.stop:
-
-      # Also stop any local XVF announcement path that may still be active
-      # (timer/button sounds from the upstream package).
+      # Stop any local XVF sound, too.
       - media_player.stop:
           id: external_media_player
           announcement: true
-
-      - script.execute: control_leds
-
-      # Restore the Freebox/Google volume even when STOP happened before the
-      # Voice Assistant had actually started.
       - homeassistant.action:
           action: script.ikabot_restaure_volume_freebox
-
+      - script.execute: control_leds
       - script.execute: ikabot_diag_idle
+      - script.execute: ikabot_stop_recovery
+
+  # A second check covers an ESPHome state transition that is still stopping
+  # when the initial STOP action finishes. Guarded against a newer wake.
+  - id: ikabot_stop_recovery
+    mode: restart
+    then:
+      - delay: 1200ms
+      - if:
+          condition:
+            lambda: return id(ikabot_stop_latched);
+          then:
+            - if:
+                condition:
+                  voice_assistant.is_running:
+                then:
+                  - logger.log:
+                      level: WARN
+                      format: "IKABOT: STOP recovery -> Voice Assistant still running"
+                  - voice_assistant.stop:
+                  - lambda: id(ikabot_proxy_player).cancel_pending();
+            - micro_wake_word.enable_model: stop
+            - if:
+                condition:
+                  not:
+                    micro_wake_word.is_running:
+                then:
+                  - micro_wake_word.start:
+            - script.execute: control_leds
 
   # A silent action has no real audio completion from the Lite. Verify that
   # the VA has returned to idle; do not let the normal 80s TTS watchdog decide.
@@ -839,7 +896,7 @@ script:
     then:
       - if:
           condition:
-            lambda: return !id(ikabot_tts_dispatched) && !id(ikabot_suppress_tts) && !uri.empty();
+            lambda: return !id(ikabot_stop_latched) && !id(ikabot_tts_dispatched) && !id(ikabot_suppress_tts) && !uri.empty();
           then:
             - lambda: id(ikabot_tts_dispatched) = true;
             - homeassistant.event:
@@ -873,33 +930,7 @@ script:
               .perform();
           }
 
-  # Script used activate the stop word if the TTS step is long.
-  # Why is this wrapped on a script?
-  #   Becasue we want to stop the sequence if the TTS step is faster than that.
-  #   This allows us to prevent having the deactivation of the stop word before its own activation.
-  - id: activate_stop_word_once
-    then:
-      - wait_until:
-          condition:
-            media_player.is_announcing:
-              id: external_media_player
-      - delay: 1s
-      # Enable stop wake word
-      - if:
-          condition:
-            switch.is_off: timer_ringing
-          then:
-            - micro_wake_word.enable_model: stop
-            - wait_until:
-                not:
-                  media_player.is_announcing:
-                    id: external_media_player
-            - if:
-                condition:
-                  switch.is_off: timer_ringing
-                then:
-                  - micro_wake_word.disable_model: stop
-
+  # STOP stays enabled globally; no temporary enable/disable helper is needed.
 
   - id: send_wake_word_event
     parameters:

@@ -112,6 +112,8 @@
       event_type: esphome.ikabot_xvf_stop_audio
   actions:
     - action: esphome.ikabot_ikabot_stop_audio
+      data:
+        token: "{{ trigger.event.data.token }}"
 
 
 - alias: "Ikabot - Archivage des 5 derniers WAV STT XVF"
