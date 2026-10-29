@@ -620,6 +620,27 @@ voice_assistant:
               uri: !lambda return id(ikabot_pending_tts_uri);
 
   on_stt_end:
+    # Backup for a short command captured by STT before local micro_wake_word
+    # detected it. Local STOP is still the primary low-latency mechanism.
+    - if:
+        condition:
+          lambda: |-
+            std::string recognized = x;
+            const auto first = recognized.find_first_not_of(" \\t\\r\\n");
+            const auto last = recognized.find_last_not_of(" \\t\\r\\n.!?");
+            if (first == std::string::npos || last == std::string::npos || last < first)
+              return false;
+            recognized = recognized.substr(first, last - first + 1);
+            for (char &c : recognized) {
+              if (c >= 'A' && c <= 'Z')
+                c = c - 'A' + 'a';
+            }
+            return recognized == "stop";
+        then:
+          - logger.log:
+              level: WARN
+              format: "IKABOT: STOP recognized by STT fallback"
+          - script.execute: ikabot_stop_everything
     - script.execute:
         id: ikabot_diag_stt_end
         text: !lambda 'return x;'

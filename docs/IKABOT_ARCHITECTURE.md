@@ -86,8 +86,12 @@ XVF wake word
 - `ikabot_stop_everything` interrompt l'assistant, annule la conversation
   continue, coupe le son local et demande au Lite de couper activation, attente
   ou TTS. Le volume Freebox est restauré.
-- Le Lite annule ses scripts audio et mémorise les identifiants de conversation
-  interrompus : les commandes audio retardées avec ces identifiants sont ignorées.
+- Le Lite annule ses scripts audio et mémorise les identifiants d'activation
+  et de conversation interrompus : les commandes retardées sont ignorées.
+  Une seconde vérification 400 ms après STOP élimine un éventuel PLAY_URI
+  qui serait parti juste après la première coupure.
+- Si le modèle local manque « Stop » pendant la dictée, un STT exactement
+  égal à « stop » (casse/ponctuation tolérées) déclenche le même arrêt.
 - L'état du modèle Stop et celui de micro_wake_word sont contrôlés périodiquement
   pour éviter de laisser Ikabot sourd après une erreur.
 - L'ordre `ikabot_stop_audio` attend maintenant un `token` depuis

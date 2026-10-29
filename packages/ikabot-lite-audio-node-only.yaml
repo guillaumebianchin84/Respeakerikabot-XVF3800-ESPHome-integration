@@ -6,6 +6,10 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '""'
+  - id: ikabot_audio_activation_token
+    type: std::string
+    restore_value: no
+    initial_value: '""'
   - id: ikabot_audio_cancelled_token
     type: std::string
     restore_value: no
@@ -28,7 +32,9 @@ api:
                        token != id(ikabot_audio_cancelled_token) &&
                        token != id(ikabot_audio_cancelled_prior_token);
             then:
-              - lambda: id(ikabot_audio_last_token) = token;
+              - lambda: |-
+                  id(ikabot_audio_last_token) = token;
+                  id(ikabot_audio_activation_token) = token;
               - script.execute:
                   id: ikabot_audio_play_activation
                   token: !lambda return token;
@@ -74,7 +80,7 @@ api:
         # Block any delayed command from either the activation or current
         # VA turn before stopping the scripts and physical audio.
         - lambda: |-
-            id(ikabot_audio_cancelled_prior_token) = id(ikabot_audio_last_token);
+            id(ikabot_audio_cancelled_prior_token) = id(ikabot_audio_activation_token);
             id(ikabot_audio_cancelled_token) = token;
         - script.stop: ikabot_audio_play_activation
         - script.stop: ikabot_audio_play_waiting
@@ -82,8 +88,30 @@ api:
         - media_player.stop:
             id: external_media_player
             announcement: true
+        - script.execute:
+            id: ikabot_audio_stop_recheck
+            token: !lambda return token;
 
 script:
+  # A queued PLAY_URI might become audible just after the first STOP.
+  # Recheck once, without interrupting a newer, legitimate conversation.
+  - id: ikabot_audio_stop_recheck
+    mode: restart
+    parameters:
+      token: string
+    then:
+      - delay: 400ms
+      - if:
+          condition:
+            lambda: |-
+              return token == id(ikabot_audio_cancelled_token) &&
+                     (id(ikabot_audio_last_token) == token ||
+                      id(ikabot_audio_last_token) == id(ikabot_audio_cancelled_prior_token));
+          then:
+            - media_player.stop:
+                id: external_media_player
+                announcement: true
+
   - id: ikabot_audio_publish_started
     mode: queued
     parameters:
