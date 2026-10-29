@@ -1,0 +1,108 @@
+# CI-only configuration.
+# Validates the Ikabot Lite audio-node overlay against the current public
+# formatBCE ReSpeaker Lite package. No real credentials or local MP3 files.
+
+packages:
+  ikabot-lite-base:
+    url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
+    ref: ikabot-integration
+    refresh: 0s
+    files:
+      - packages/ikabot-lite-audio-base-draft.yaml
+  ikabot-audio-node:
+    url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
+    ref: ikabot-integration
+    refresh: 0s
+    files:
+      - packages/ikabot-lite-audio-node-only.yaml
+
+esphome:
+  name: ikabot-lite-audio-ci
+  friendly_name: Ikabot Lite CI
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret ikabot_lite_api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ikabot_lite_ota_password
+
+# The real Ikabot has these IDs mapped to local /config/esphome/sounds MP3s.
+# CI uses one public sound repeatedly: we are validating the component graph,
+# actions and lambdas, not the audio content.
+audio_file:
+  - id: activation_01
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_02
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_03
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_04
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_05
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_06
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_07
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_08
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_09
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_10
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_11
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_12
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_13
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_14
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: activation_15
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_01
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_02
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_03
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_04
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_05
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_06
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_07
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_08
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_09
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_10
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_11
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_12
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_13
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_14
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_15
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_16
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_17
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_18
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_19
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  - id: attente_20
+    file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac

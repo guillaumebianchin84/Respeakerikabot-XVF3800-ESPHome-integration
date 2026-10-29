@@ -1,0 +1,140 @@
+# Candidate Lite audio-only, preserve previous config/ikabot-lite-final.yaml
+packages:
+  ikabot-lite-base:
+    url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
+    ref: ikabot-integration
+    refresh: 0s
+    files:
+      - packages/ikabot-lite-audio-base-draft.yaml
+
+  ikabot-audio-node:
+    url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
+    ref: ikabot-integration
+    refresh: 0s
+    files:
+      - packages/ikabot-lite-audio-node-only.yaml
+
+esphome:
+  name: ikabot
+  friendly_name: ikabot
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret ikabot_api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ikabot_ota_password
+
+# Sons locaux conserves sur le Lite.
+audio_file:
+
+  - id: activation_01
+    file: "/config/esphome/sounds/activation/01_oui.mp3"
+
+  - id: activation_02
+    file: "/config/esphome/sounds/activation/02_j_ecoute.mp3"
+
+  - id: activation_03
+    file: "/config/esphome/sounds/activation/03_je_vous_ecoute.mp3"
+
+  - id: activation_04
+    file: "/config/esphome/sounds/activation/04_a_vous.mp3"
+
+  - id: activation_05
+    file: "/config/esphome/sounds/activation/05_parlez.mp3"
+
+  - id: activation_06
+    file: "/config/esphome/sounds/activation/06_dites_moi.mp3"
+
+  - id: activation_07
+    file: "/config/esphome/sounds/activation/07_je_suis_la.mp3"
+
+  - id: activation_08
+    file: "/config/esphome/sounds/activation/08_a_votre_service.mp3"
+
+  - id: activation_09
+    file: "/config/esphome/sounds/activation/09_que_puis_je_faire.mp3"
+
+  - id: activation_10
+    file: "/config/esphome/sounds/activation/10_ma_foi.mp3"
+
+  - id: activation_11
+    file: "/config/esphome/sounds/activation/11_hmm.mp3"
+
+  - id: activation_12
+    file: "/config/esphome/sounds/activation/12_je_vous_prie.mp3"
+
+  - id: activation_13
+    file: "/config/esphome/sounds/activation/13_je_vous_entends.mp3"
+
+  - id: activation_14
+    file: "/config/esphome/sounds/activation/14_que_desirez_vous.mp3"
+
+  - id: activation_15
+    file: "/config/esphome/sounds/activation/15_allons_y.mp3"
+
+
+  - id: attente_01
+    file: "/config/esphome/sounds/attente/01_fort_bien.mp3"
+
+  - id: attente_02
+    file: "/config/esphome/sounds/attente/02_voyons_cela.mp3"
+
+  - id: attente_03
+    file: "/config/esphome/sounds/attente/03_un_instant.mp3"
+
+  - id: attente_04
+    file: "/config/esphome/sounds/attente/04_a_l_instant.mp3"
+
+  - id: attente_05
+    file: "/config/esphome/sounds/attente/05_je_regarde.mp3"
+
+  - id: attente_06
+    file: "/config/esphome/sounds/attente/06_je_verifie.mp3"
+
+  - id: attente_07
+    file: "/config/esphome/sounds/attente/07_hmm_voyons.mp3"
+
+  - id: attente_08
+    file: "/config/esphome/sounds/attente/08_soit.mp3"
+
+  - id: attente_09
+    file: "/config/esphome/sounds/attente/09_tres_bien.mp3"
+
+  - id: attente_10
+    file: "/config/esphome/sounds/attente/10_compris.mp3"
+
+  - id: attente_11
+    file: "/config/esphome/sounds/attente/11_je_m_en_occupe.mp3"
+
+  - id: attente_12
+    file: "/config/esphome/sounds/attente/12_laissez_moi_voir.mp3"
+
+  - id: attente_13
+    file: "/config/esphome/sounds/attente/13_voyons_voir.mp3"
+
+  - id: attente_14
+    file: "/config/esphome/sounds/attente/14_ma_foi_voyons_cela.mp3"
+
+  - id: attente_15
+    file: "/config/esphome/sounds/attente/15_diantre_un_instant.mp3"
+
+  - id: attente_16
+    file: "/config/esphome/sounds/attente/16_merite_verification.mp3"
+
+  - id: attente_17
+    file: "/config/esphome/sounds/attente/17_je_consulte_cela.mp3"
+
+  - id: attente_18
+    file: "/config/esphome/sounds/attente/18_cela_demande_un_instant.mp3"
+
+  - id: attente_19
+    file: "/config/esphome/sounds/attente/19_fort_bien_voyons.mp3"
+
+  - id: attente_20
+    file: "/config/esphome/sounds/attente/20_je_vais_voir_cela.mp3"
