@@ -134,7 +134,8 @@ respeaker_xvf3800:
     # the next poll is the retry, so keep this fast enough to track a speaker.
     # This poll is also the azimuth source for beam lock. Set update_interval to
     # never, and the Beam lock switch stops working.
-    update_interval: 500ms
+    # KIMIA I2C recovery: suppress nonessential AEC reads while testing LEDs.
+    update_interval: never
   # No firmware: section here. DFU is ALSO disabled in the KIMIA-specific C++ driver.
   # Never update the XMOS 1.0.9 through this ESP32 until separately approved.
 
