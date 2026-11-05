@@ -100,8 +100,8 @@ respeaker_xvf3800:
   mute_switch:
     id: mic_mute_switch
     name: "Microphone Mute"
-    # Isolation bench: do not poll GPO mute status every second.
-    update_interval: never
+    # GPO-only bench: read mute state once per second; LED commands stay DISABLED.
+    update_interval: 1s
     on_turn_on:
       - if:
           condition:
