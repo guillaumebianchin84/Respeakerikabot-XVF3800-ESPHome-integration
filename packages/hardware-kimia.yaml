@@ -100,7 +100,8 @@ respeaker_xvf3800:
   mute_switch:
     id: mic_mute_switch
     name: "Microphone Mute"
-    update_interval: 1s
+    # Isolation bench: do not poll GPO mute status every second.
+    update_interval: never
     on_turn_on:
       - if:
           condition:
@@ -125,7 +126,8 @@ respeaker_xvf3800:
                 sound_file: "mute_switch_off_sound"
   dfu_version:
     name: "Firmware Version"
-    update_interval: 120s
+    # Isolation bench: version is probed explicitly by the driver every 5s.
+    update_interval: never
   led_beam_sensor:
     name: "Voice Beam Direction"
     id: beam_direction
