@@ -18,26 +18,15 @@ static const char *const TAG = "respeaker_xvf3800";
 void RespeakerXVF3800::setup() {
   ESP_LOGCONFIG(TAG, "Setting up RespeakerXVF3800...");
 
-  uint8_t test_data;
-  i2c::ErrorCode err = this->read(&test_data, 1);
-  if (err != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Could not communicate with XVF3800 at configured I2C address");
-    this->mark_failed();
-    return;
-  }
-
-  // Wait for XMOS to boot...
+  // KIMIA DIAGNOSTIC ONLY:
+  // The original bare 1-byte read is not a valid XVF3800 command.
+  // No codec/audio tuning, LED commands or XMOS DFU writes are triggered.
   this->set_timeout(3000, [this]() {
     if (!this->dfu_get_version_()) {
-      ESP_LOGE(TAG, "Communication with Respeaker XVF3800 failed");
+      ESP_LOGE(TAG, "KIMIA DIAG: XMOS DFU_GETVERSION failed");
       this->mark_failed();
-    } else if (!this->versions_match_() && this->firmware_bin_is_valid_()) {
-      ESP_LOGW(TAG, "Expected XMOS version: %u.%u.%u; found: %u.%u.%u. Updating...", this->firmware_bin_version_major_,
-               this->firmware_bin_version_minor_, this->firmware_bin_version_patch_, this->firmware_version_major_,
-               this->firmware_version_minor_, this->firmware_version_patch_);
-      this->start_dfu_update();
     } else {
-      this->apply_audio_tuning_();
+      ESP_LOGI(TAG, "KIMIA DIAG: XVF3800 version read OK; tuning and DFU disabled");
     }
   });
 }
@@ -274,15 +263,16 @@ bool RespeakerXVF3800::dfu_get_version_() {
                                  DFU_CONTROLLER_SERVICER_RESID_DFU_GETVERSION | DFU_COMMAND_READ_BIT, 4};
   uint8_t version_resp[4];
 
-  auto error_code = this->write(version_req, sizeof(version_req));
+  // Combined I2C transaction with repeated START, as required by XMOS.
+  auto error_code = this->write_read(version_req, sizeof(version_req), version_resp, sizeof(version_resp));
   if (error_code != i2c::ERROR_OK) {
-    ESP_LOGW(TAG, "Request version failed");
+    ESP_LOGW(TAG, "KIMIA DIAG: GETVERSION I2C failed, code=%d", (int) error_code);
     return false;
   }
-
-  error_code = this->read(version_resp, sizeof(version_resp));
-  if (error_code != i2c::ERROR_OK || version_resp[0] != CTRL_DONE) {
-    ESP_LOGW(TAG, "Read version failed");
+  ESP_LOGI(TAG, "KIMIA DIAG: GETVERSION response %02X %02X %02X %02X",
+           version_resp[0], version_resp[1], version_resp[2], version_resp[3]);
+  if (version_resp[0] != CTRL_DONE) {
+    ESP_LOGW(TAG, "KIMIA DIAG: GETVERSION XMOS status=0x%02X", version_resp[0]);
     return false;
   }
 
@@ -542,13 +532,10 @@ std::string RespeakerXVF3800::read_dfu_version() {
   
   const uint8_t request[] = {0xF0, 0x58 | I2C_COMMAND_READ_BIT, 4};
   
-  i2c::ErrorCode err = this->write(request, sizeof(request));
-  if (err == i2c::ERROR_OK) {
-    err = this->read(data, 4);
-    if (err == i2c::ERROR_OK && data[0] == 0) {
-      ESP_LOGI(TAG, "Version request successful: %u.%u.%u", data[1], data[2], data[3]);
-      return str_sprintf("%u.%u.%u", data[1], data[2], data[3]);
-    }
+  i2c::ErrorCode err = this->write_read(request, sizeof(request), data, sizeof(data));
+  if (err == i2c::ERROR_OK && data[0] == CTRL_DONE) {
+    ESP_LOGI(TAG, "Version request successful: %u.%u.%u", data[1], data[2], data[3]);
+    return str_sprintf("%u.%u.%u", data[1], data[2], data[3]);
   }
   return "Unknown";
 }
