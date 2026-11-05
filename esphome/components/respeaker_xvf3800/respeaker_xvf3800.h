@@ -36,7 +36,11 @@ static const uint16_t MAX_XFER = 128;  // maximum number of bytes we can transfe
 const uint8_t GPO_SERVICER_RESID = 20;
 const uint8_t GPO_SERVICER_RESID_GPO_READ_VALUES = 0;
 const uint8_t GPO_SERVICER_RESID_GPO_WRITE_VALUE = 1;
-const uint8_t GPO_SERVICER_RESID_LED_RING_VALUE = 18;
+// Official Seeed GPO command mapping (firmware 1.0.9): 18=DOA_VALUE, 19=LED_RING_COLOR.
+const uint8_t GPO_SERVICER_RESID_LED_RING_VALUE = 19;
+const uint8_t GPO_LED_EFFECT = 12;
+const uint8_t GPO_LED_BRIGHTNESS = 13;
+const uint8_t GPO_LED_COLOR = 16;
 const uint8_t GPO_GPO_READ_NUM_BYTES = 5;
 
 // AEC Azimuth constants for LED beam sensor
@@ -200,7 +204,8 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
  public:
   void setup() override;
   bool can_proceed() override {
-    return this->is_failed() || (this->version_read_() && (this->versions_match_() || !this->firmware_bin_is_valid_()));
+    // KIMIA never auto-flashes the XMOS, even if versions differ.
+    return this->is_failed() || this->version_read_();
   }
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::HARDWARE - 1; }
@@ -327,6 +332,10 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   // Last frame written by set_led_ring(), so an unchanged frame skips the bus.
   uint32_t last_led_frame_[12]{};
   bool led_frame_valid_{false};
+  // Safe common-denominator LED mode: solid ring via GPO LED_EFFECT=3 / LED_COLOR=16.
+  bool kimia_led_mode_enabled_{false};
+  bool kimia_led_off_{false};
+  uint32_t kimia_last_led_color_{0};
 
   // The chip resets these on power-up; they are (re)applied after boot.
   bool asr_route_{false};
@@ -338,7 +347,7 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   void write_agc_max_gain_();
 
   // Helper method for XMOS communication
-  void xmos_write_bytes(uint8_t resid, uint8_t cmd, const uint8_t *value, uint8_t write_byte_num);
+  bool xmos_write_bytes(uint8_t resid, uint8_t cmd, const uint8_t *value, uint8_t write_byte_num);
 
   // Reads one of the four AEC azimuth slots (radians) returned by cmd 75:
   //   0 = beam 1 (fixed beam 1 when fixed mode is on)
