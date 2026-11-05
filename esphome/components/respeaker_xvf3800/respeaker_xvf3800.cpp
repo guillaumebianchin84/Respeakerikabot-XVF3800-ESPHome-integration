@@ -21,12 +21,17 @@ void RespeakerXVF3800::setup() {
   // KIMIA DIAGNOSTIC ONLY:
   // The original bare 1-byte read is not a valid XVF3800 command.
   // No codec/audio tuning, LED commands or XMOS DFU writes are triggered.
-  this->set_timeout(3000, [this]() {
-    if (!this->dfu_get_version_()) {
-      ESP_LOGE(TAG, "KIMIA DIAG: XMOS DFU_GETVERSION failed");
-      this->mark_failed();
-    } else {
+  // A single I2C GETVERSION timeout is recoverable; do not permanently mark
+  // the component FAILED before retrying. This branch is for KIMIA diagnostics
+  // only and deliberately does not perform XMOS tuning or firmware updates.
+  this->set_interval("kimia_version_probe", 2000, [this]() {
+    if (this->version_read_()) {
+      return;  // Version was already read successfully: no more I2C probes.
+    }
+    if (this->dfu_get_version_()) {
       ESP_LOGI(TAG, "KIMIA DIAG: XVF3800 version read OK; tuning and DFU disabled");
+    } else {
+      ESP_LOGW(TAG, "KIMIA DIAG: XMOS GETVERSION timeout/error; retry in 2 seconds (no permanent failure)");
     }
   });
 }
