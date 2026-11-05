@@ -490,34 +490,40 @@ bool RespeakerXVF3800::xmos_write_bytes(uint8_t resid, uint8_t cmd, const uint8_
 }
 
 void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
-  if (!this->tuning_applied_) return;  // Don't flood I2C before XMOS is ready.
-  // Compatibility mode for the current XMOS 1.0.9: LED_EFFECT=3 (solid)
-  // and LED_COLOR=16 (single RGB value), as documented by Seeed.
-  // The original upstream driver sent command 18, which is DOA_VALUE (read-only)
-  // on the official firmware; command 19 is the optional individual-ring mode.
-  // Individual LED animations are deliberately NOT enabled until ring mode 5
-  // support is verified on the particular XMOS firmware.
-  uint32_t r=0, g=0, b=0;
+  if (!this->tuning_applied_) return;
+  // Protect the XMOS control bus: if a LED command fails, retry only after
+  // 5 seconds instead of saturating I2C at the animation interval frequency.
+  const uint32_t now = millis();
+  if (static_cast<int32_t>(now - this->kimia_led_retry_after_ms_) < 0) return;
+  auto led_write = [this, now](uint8_t cmd, const uint8_t *data, uint8_t len) -> bool {
+    if (this->xmos_write_bytes(GPO_SERVICER_RESID, cmd, data, len)) return true;
+    this->kimia_led_retry_after_ms_ = now + 5000;
+    ESP_LOGW(TAG, "KIMIA LED I2C error: pause 5s; cmd=%u", cmd);
+    return false;
+  };
+
+  // Single-color compatibility mode (LED_EFFECT=3, LED_COLOR=16).
+  // The official firmware uses 18 for DOA_VALUE (read-only), not LED_RING_COLOR.
+  uint32_t r = 0, g = 0, b = 0;
   for (int i = 0; i < 12; ++i) {
     r += (rgb_array[i] >> 16) & 0xFFu;
     g += (rgb_array[i] >> 8) & 0xFFu;
     b += rgb_array[i] & 0xFFu;
   }
   const uint32_t avg = ((r / 12) << 16) | ((g / 12) << 8) | (b / 12);
-
   if (avg == 0) {
     if (!this->kimia_led_off_) {
       const uint8_t mode_off = 0;
-      if (!this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_EFFECT, &mode_off, 1)) return;
+      if (!led_write(GPO_LED_EFFECT, &mode_off, 1)) return;
       this->kimia_led_off_ = true;
       this->kimia_led_mode_enabled_ = false;
     }
   } else {
     if (!this->kimia_led_mode_enabled_) {
       const uint8_t mode_solid = 3;
-      const uint8_t level = 255;
-      if (!this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_BRIGHTNESS, &level, 1) ||
-          !this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_EFFECT, &mode_solid, 1)) return;
+      // Do not send brightness: the Seeed API uses it for breath/rainbow,
+      // and it is unnecessary for the solid LED test.
+      if (!led_write(GPO_LED_EFFECT, &mode_solid, 1)) return;
       this->kimia_led_mode_enabled_ = true;
       this->kimia_led_off_ = false;
       this->led_frame_valid_ = false;
@@ -529,7 +535,7 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
         static_cast<uint8_t>((avg >> 16) & 0xFFu),
         0
       };
-      if (!this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_COLOR, color, 4)) return;
+      if (!led_write(GPO_LED_COLOR, color, 4)) return;
       this->kimia_last_led_color_ = avg;
     }
   }
