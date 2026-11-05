@@ -336,6 +336,7 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   bool kimia_led_mode_enabled_{false};
   bool kimia_led_off_{false};
   uint32_t kimia_last_led_color_{0};
+  uint32_t kimia_led_retry_after_ms_{0};  // 5-second cooldown after failed LED transaction.
 
   // The chip resets these on power-up; they are (re)applied after boot.
   bool asr_route_{false};
