@@ -40,7 +40,7 @@ void RespeakerXVF3800::setup() {
     this->led_frame_valid_ = false;
     this->kimia_led_mode_enabled_ = false;
     this->set_led_ring(blue);
-    ESP_LOGI(TAG, "KIMIA: LED startup command sent (blue solid; check board visually)");
+    ESP_LOGI(TAG, "KIMIA: LED startup blue requested (I2C ACKs logged separately; verify board visually)");
   });
 }
 
@@ -537,6 +537,7 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
       };
       if (!led_write(GPO_LED_COLOR, color, 4)) return;
       this->kimia_last_led_color_ = avg;
+      ESP_LOGI(TAG, "KIMIA LED: solid color 0x%06X acknowledged over I2C", (unsigned int)avg);
     }
   }
   memcpy(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_));
