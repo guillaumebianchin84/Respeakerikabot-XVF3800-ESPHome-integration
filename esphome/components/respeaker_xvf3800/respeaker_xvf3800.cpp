@@ -326,6 +326,7 @@ bool RespeakerXVF3800::read_gpo_values(uint8_t *buffer, uint8_t *status) {
   }
 
   *status = data[0];
+  ESP_LOGI(TAG, "KIMIA GPO-only: I2C read OK, XMOS status=%u", (unsigned int) data[0]);
   for (uint8_t i = 0; i < GPO_GPO_READ_NUM_BYTES; i++) {
     buffer[i] = data[i + 1];
   }
