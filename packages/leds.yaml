@@ -87,7 +87,8 @@ globals:
     initial_value: 'false'
 
 interval:
-  - interval: 50ms
+  # KIMIA V6 I2C recovery: slow LED updates while investigating bus stability.
+  - interval: 1s
     id: led_animation_interval
     then:
       - lambda: |-
