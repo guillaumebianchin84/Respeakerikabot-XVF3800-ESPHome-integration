@@ -804,7 +804,7 @@ light:
     red: led_ring_out_r
     green: led_ring_out_g
     blue: led_ring_out_b
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: RESTORE_DEFAULT_ON
     default_transition_length: 0s
     gamma_correct: 0
     effects:
