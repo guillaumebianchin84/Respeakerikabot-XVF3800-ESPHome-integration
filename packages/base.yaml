@@ -14,9 +14,9 @@ substitutions:
   friendly_name: reSpeaker XVF3800 Assistant
 
   # --- Source refs ---------------------------------------------------------
-  # Ref of this repository. It selects the C++ components and the DFU firmware.
+  # KIMIA-only full driver branch: no XMOS DFU allowed.
   # Set it to the same tag or commit that you use for the packages themselves.
-  respeaker_ref: main
+  respeaker_ref: kimia-v6-secure-20261105
   # Ref of the patched i2s_audio fork. The stock component does not work.
   i2s_audio_ref: respeaker_microphone
 
@@ -167,8 +167,9 @@ i2c:
   - id: internal_i2c
     sda: GPIO5
     scl: GPIO6
-    scan: true
-    frequency: 400kHz
+    scan: false
+    frequency: 100kHz
+    timeout: 13ms
 
 psram:
   mode: octal
@@ -207,7 +208,7 @@ external_components:
     refresh: 0s
   - source:
       type: git
-      url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
+      url: https://github.com/guillaumebianchin84/Respeakerikabot-XVF3800-ESPHome-integration
       ref: ${respeaker_ref}
     components:
       - respeaker_xvf3800
