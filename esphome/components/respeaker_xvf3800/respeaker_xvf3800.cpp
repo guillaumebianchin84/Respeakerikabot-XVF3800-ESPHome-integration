@@ -16,29 +16,31 @@ namespace respeaker_xvf3800 {
 static const char *const TAG = "respeaker_xvf3800";
 
 void RespeakerXVF3800::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up RespeakerXVF3800...");
-
-  uint8_t test_data;
-  i2c::ErrorCode err = this->read(&test_data, 1);
-  if (err != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Could not communicate with XVF3800 at configured I2C address");
-    this->mark_failed();
-    return;
-  }
-
-  // Wait for XMOS to boot...
-  this->set_timeout(3000, [this]() {
+  ESP_LOGCONFIG(TAG, "KIMIA FULL SAFE: Setting up RespeakerXVF3800 (XMOS DFU disabled)...");
+  // Do not issue the invalid bare-byte read from the upstream driver.
+  // Transient I2C NACK/timeout is recoverable: try again every 2 seconds.
+  this->set_interval("kimia_xmos_full_init", 2000, [this]() {
+    if (this->tuning_applied_) return;
     if (!this->dfu_get_version_()) {
-      ESP_LOGE(TAG, "Communication with Respeaker XVF3800 failed");
-      this->mark_failed();
-    } else if (!this->versions_match_() && this->firmware_bin_is_valid_()) {
-      ESP_LOGW(TAG, "Expected XMOS version: %u.%u.%u; found: %u.%u.%u. Updating...", this->firmware_bin_version_major_,
-               this->firmware_bin_version_minor_, this->firmware_bin_version_patch_, this->firmware_version_major_,
-               this->firmware_version_minor_, this->firmware_version_patch_);
-      this->start_dfu_update();
-    } else {
-      this->apply_audio_tuning_();
+      ESP_LOGW(TAG, "KIMIA: XMOS version read failed; retry in 2s (no permanent FAILED)");
+      return;
     }
+
+    // This full KIMIA branch must NEVER start an XMOS DFU update.
+    if (this->firmware_bin_is_valid_()) {
+      ESP_LOGW(TAG, "KIMIA SAFE: A firmware blob is configured, but DFU updates are disabled by code");
+    }
+    this->apply_audio_tuning_();
+    ESP_LOGI(TAG, "KIMIA: full driver initialized, XMOS version=%u.%u.%u; DFU DISABLED",
+             this->firmware_version_major_, this->firmware_version_minor_, this->firmware_version_patch_);
+    // LED startup test independent of Home Assistant connection or automations.
+    // Force all LEDs blue via the widely-supported solid mode.
+    uint32_t blue[12];
+    for (int i = 0; i < 12; ++i) blue[i] = 0x000040;
+    this->led_frame_valid_ = false;
+    this->kimia_led_mode_enabled_ = false;
+    this->set_led_ring(blue);
+    ESP_LOGI(TAG, "KIMIA: LED startup command sent (blue solid; check board visually)");
   });
 }
 
@@ -97,28 +99,8 @@ uint8_t RespeakerXVF3800::read_vnr() {
 }
 
 void RespeakerXVF3800::start_dfu_update() {
-  if (this->firmware_bin_ == nullptr || !this->firmware_bin_length_) {
-    ESP_LOGE(TAG, "Firmware invalid");
-    return;
-  }
-
-  ESP_LOGI(TAG, "Starting update from %u.%u.%u...", this->firmware_version_major_, this->firmware_version_minor_,
-           this->firmware_version_patch_);
-#ifdef USE_RESPEAKER_XVF3800_STATE_CALLBACK
-  this->state_callback_.call(DFU_START, 0, UPDATE_OK);
-#endif
-
-  if (!this->dfu_set_alternate_()) {
-    ESP_LOGE(TAG, "Set alternate request failed");
-    this->dfu_update_status_ = UPDATE_COMMUNICATION_ERROR;
-    return;
-  }
-
-  this->bytes_written_ = 0;
-  this->last_progress_ = 0;
-  this->last_ready_ = millis();
-  this->update_start_time_ = millis();
-  this->dfu_update_status_ = this->dfu_update_send_block_();
+  // KIMIA FULL SAFE: blocked even if an automation accidentally requests it.
+  ESP_LOGE(TAG, "KIMIA SAFE: XMOS firmware flashing is DISABLED (DFU refused)");
 }
 
 RespeakerXVF3800UpdaterStatus RespeakerXVF3800::dfu_update_send_block_() {
@@ -270,31 +252,24 @@ bool RespeakerXVF3800::dfu_get_status_() {
 }
 
 bool RespeakerXVF3800::dfu_get_version_() {
-  const uint8_t version_req[] = {DFU_CONTROLLER_SERVICER_RESID,
-                                 DFU_CONTROLLER_SERVICER_RESID_DFU_GETVERSION | DFU_COMMAND_READ_BIT, 4};
-  uint8_t version_resp[4];
-
-  auto error_code = this->write(version_req, sizeof(version_req));
-  if (error_code != i2c::ERROR_OK) {
-    ESP_LOGW(TAG, "Request version failed");
+  const uint8_t request[3] = {DFU_CONTROLLER_SERVICER_RESID,
+      static_cast<uint8_t>(DFU_CONTROLLER_SERVICER_RESID_DFU_GETVERSION | DFU_COMMAND_READ_BIT), 4};
+  uint8_t response[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+  const auto err = this->write_read(request, sizeof(request), response, sizeof(response));
+  if (err != i2c::ERROR_OK) {
+    ESP_LOGW(TAG, "KIMIA GETVERSION I2C error=%d; will retry", (int)err);
     return false;
   }
-
-  error_code = this->read(version_resp, sizeof(version_resp));
-  if (error_code != i2c::ERROR_OK || version_resp[0] != CTRL_DONE) {
-    ESP_LOGW(TAG, "Read version failed");
+  if (response[0] != CTRL_DONE) {
+    ESP_LOGW(TAG, "KIMIA GETVERSION status=0x%02X; will retry", response[0]);
     return false;
   }
-
-  std::string version = str_sprintf("%u.%u.%u", version_resp[1], version_resp[2], version_resp[3]);
-  ESP_LOGI(TAG, "DFU version: %s", version.c_str());
-  this->firmware_version_major_ = version_resp[1];
-  this->firmware_version_minor_ = version_resp[2];
-  this->firmware_version_patch_ = version_resp[3];
-  if (this->firmware_version_ != nullptr) {
-    this->firmware_version_->publish_state(version);
-  }
-
+  this->firmware_version_major_ = response[1];
+  this->firmware_version_minor_ = response[2];
+  this->firmware_version_patch_ = response[3];
+  const std::string version = str_sprintf("%u.%u.%u", response[1], response[2], response[3]);
+  ESP_LOGI(TAG, "KIMIA XMOS version: %s", version.c_str());
+  if (this->firmware_version_ != nullptr) this->firmware_version_->publish_state(version);
   return true;
 }
 
@@ -498,43 +473,68 @@ void RespeakerXVF3800::unlock_beam() {
   ESP_LOGI(TAG, "Beam lock released");
 }
 
-void RespeakerXVF3800::xmos_write_bytes(uint8_t resid, uint8_t cmd, const uint8_t *value, uint8_t write_byte_num) {
+bool RespeakerXVF3800::xmos_write_bytes(uint8_t resid, uint8_t cmd, const uint8_t *value, uint8_t write_byte_num) {
   uint8_t payload[3 + 255];
   payload[0] = resid;
   payload[1] = cmd;
   payload[2] = write_byte_num;
-
   if (write_byte_num > 0 && value != nullptr) {
     memcpy(&payload[3], value, write_byte_num);
   }
-
-  i2c::ErrorCode err = this->write(payload, 3 + write_byte_num);
-  
+  const i2c::ErrorCode err = this->write(payload, 3 + write_byte_num);
   if (err != i2c::ERROR_OK) {
-    ESP_LOGW(TAG, "Error in xmos_write_bytes. resid=%d, cmd=%d, error=%d", resid, cmd, (int)err);
+    ESP_LOGW(TAG, "KIMIA I2C write failed: resid=%u cmd=%u error=%d", resid, cmd, (int)err);
+    return false;
   }
+  return true;
 }
 
 void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
-  // The YAML animation interval calls this 20 times a second whether the frame
-  // changed or not. Skip the bus when it did not.
-  if (this->led_frame_valid_ && memcmp(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_)) == 0) {
-    return;
+  if (!this->tuning_applied_) return;  // Don't flood I2C before XMOS is ready.
+  // Compatibility mode for the current XMOS 1.0.9: LED_EFFECT=3 (solid)
+  // and LED_COLOR=16 (single RGB value), as documented by Seeed.
+  // The original upstream driver sent command 18, which is DOA_VALUE (read-only)
+  // on the official firmware; command 19 is the optional individual-ring mode.
+  // Individual LED animations are deliberately NOT enabled until ring mode 5
+  // support is verified on the particular XMOS firmware.
+  uint32_t r=0, g=0, b=0;
+  for (int i = 0; i < 12; ++i) {
+    r += (rgb_array[i] >> 16) & 0xFFu;
+    g += (rgb_array[i] >> 8) & 0xFFu;
+    b += rgb_array[i] & 0xFFu;
+  }
+  const uint32_t avg = ((r / 12) << 16) | ((g / 12) << 8) | (b / 12);
+
+  if (avg == 0) {
+    if (!this->kimia_led_off_) {
+      const uint8_t mode_off = 0;
+      if (!this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_EFFECT, &mode_off, 1)) return;
+      this->kimia_led_off_ = true;
+      this->kimia_led_mode_enabled_ = false;
+    }
+  } else {
+    if (!this->kimia_led_mode_enabled_) {
+      const uint8_t mode_solid = 3;
+      const uint8_t level = 255;
+      if (!this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_BRIGHTNESS, &level, 1) ||
+          !this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_EFFECT, &mode_solid, 1)) return;
+      this->kimia_led_mode_enabled_ = true;
+      this->kimia_led_off_ = false;
+      this->led_frame_valid_ = false;
+    }
+    if (!this->led_frame_valid_ || avg != this->kimia_last_led_color_) {
+      const uint8_t color[4] = {
+        static_cast<uint8_t>(avg & 0xFFu),
+        static_cast<uint8_t>((avg >> 8) & 0xFFu),
+        static_cast<uint8_t>((avg >> 16) & 0xFFu),
+        0
+      };
+      if (!this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_LED_COLOR, color, 4)) return;
+      this->kimia_last_led_color_ = avg;
+    }
   }
   memcpy(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_));
   this->led_frame_valid_ = true;
-
-  uint8_t payload[48];
-  
-  for (int i = 0; i < 12; i++) {
-    uint32_t color = rgb_array[i];
-    payload[i * 4 + 0] = (uint8_t)(color & 0xFF);
-    payload[i * 4 + 1] = (uint8_t)((color >> 8) & 0xFF);
-    payload[i * 4 + 2] = (uint8_t)((color >> 16) & 0xFF);
-    payload[i * 4 + 3] = 0x00;
-  }
-  
-  this->xmos_write_bytes(GPO_SERVICER_RESID, GPO_SERVICER_RESID_LED_RING_VALUE, payload, 48);
 }
 
 std::string RespeakerXVF3800::read_dfu_version() {
