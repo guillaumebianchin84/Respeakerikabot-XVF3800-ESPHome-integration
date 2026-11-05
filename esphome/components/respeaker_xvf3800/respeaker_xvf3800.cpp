@@ -33,14 +33,13 @@ void RespeakerXVF3800::setup() {
     this->apply_audio_tuning_();
     ESP_LOGI(TAG, "KIMIA: full driver initialized, XMOS version=%u.%u.%u; DFU DISABLED",
              this->firmware_version_major_, this->firmware_version_minor_, this->firmware_version_patch_);
-    // LED startup test independent of Home Assistant connection or automations.
-    // Force all LEDs blue via the widely-supported solid mode.
-    uint32_t blue[12];
-    for (int i = 0; i < 12; ++i) blue[i] = 0x000040;
-    this->led_frame_valid_ = false;
-    this->kimia_led_mode_enabled_ = false;
-    this->set_led_ring(blue);
-    ESP_LOGI(TAG, "KIMIA: LED startup blue requested (I2C ACKs logged separately; verify board visually)");
+    ESP_LOGI(TAG, "KIMIA I2C ISOLATION: LED writes disabled; mute/GPO polling disabled by package");
+  });
+  // One read-only XMOS control transaction per 5 seconds. If this remains
+  // healthy with LED and GPO traffic disabled, reintroduce commands one at a time.
+  this->set_interval("kimia_i2c_probe", 5000, [this]() {
+    const bool ok = this->dfu_get_version_();
+    ESP_LOGI(TAG, "KIMIA ISOLATION: 5s GETVERSION %s", ok ? "OK" : "FAILED");
   });
 }
 
@@ -490,6 +489,9 @@ bool RespeakerXVF3800::xmos_write_bytes(uint8_t resid, uint8_t cmd, const uint8_
 }
 
 void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
+  // KIMIA isolation build: deliberately suppress all LED I2C traffic.
+  // This is a bench diagnostic, NOT the final voice/LED firmware.
+  return;
   if (!this->tuning_applied_) return;
   // Protect the XMOS control bus: if a LED command fails, retry only after
   // 5 seconds instead of saturating I2C at the animation interval frequency.
